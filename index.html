@@ -309,8 +309,12 @@ function kurve(x) {
     return (kurven[k] = c);
 }
 
+// Noch klingende Stimmen je Ton. Ein neuer Anschlag dämpft den alten Ton derselben Höhe
+// (wie die Saite beim Klavier), sonst addieren sich beide je nach Phasenlage mal laut, mal schwach
+const klingend = new Map();
 function stimme(n) {
     const c = audio(), t = c.currentTime, f = 440 * Math.pow(2, (n - 69) / 12);
+    (klingend.get(n) || new Set()).forEach(v => v.daempfen());
     const x = (s.schaerfe[s.klang] ?? 30) / 100;   // 0 = rund und weich, 1 = laut und hell
     const g = c.createGain(), sat = c.createWaveShaper(), oscs = [];
     sat.curve = kurve(x);
@@ -359,16 +363,29 @@ function stimme(n) {
         oscs.push(o1, o2, o3);
     }
     midiSenden(0x90, n, 100);
-    return {
+    let ende = Infinity, losgelassen = false;
+    function abklingen(tau, rest) {
+        const t2 = c.currentTime;
+        if (t2 + rest >= ende) return;
+        ende = t2 + rest;
+        if (g.gain.cancelAndHoldAtTime) g.gain.cancelAndHoldAtTime(t2);
+        else { g.gain.cancelScheduledValues(t2); g.gain.setValueAtTime(g.gain.value, t2); }
+        g.gain.setTargetAtTime(0, t2, tau);
+        oscs.forEach(o => { try { o.stop(ende); } catch (e) {} });
+    }
+    const v = {
         aus() {
-            const t2 = c.currentTime;
-            if (g.gain.cancelAndHoldAtTime) g.gain.cancelAndHoldAtTime(t2);
-            else { g.gain.cancelScheduledValues(t2); g.gain.setValueAtTime(g.gain.value, t2); }
-            g.gain.setTargetAtTime(0, t2, s.klang === 'klavier' ? 0.07 : 0.09);
-            oscs.forEach(o => o.stop(t2 + 0.8));
+            if (losgelassen) return;
+            losgelassen = true;
+            abklingen(s.klang === 'klavier' ? 0.07 : 0.09, 0.8);
             midiSenden(0x80, n, 0);
-        }
+        },
+        daempfen() { abklingen(0.006, 0.05); }
     };
+    if (!klingend.has(n)) klingend.set(n, new Set());
+    klingend.get(n).add(v);
+    oscs[0].onended = () => klingend.get(n).delete(v);
+    return v;
 }
 
 /* ---------- MIDI (nur wo der Browser es kann) ---------- */
