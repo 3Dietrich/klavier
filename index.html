@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Klavier">
+<meta name="theme-color" content="#111111">
+<title>Klavier</title>
+<!-- Klavier fürs iPhone (@dd 20261102): eigene Klangerzeugung (Web Audio), weil Safari auf dem
+     iPhone kein Web-MIDI kann. Quer zwei Reihen, hochkant drei bis fünf, Tasten einstellbar
+     je Lage (⚙). MIDI-Ausgang nur dort, wo der Browser ihn anbietet (Chrome am Mac). -->
+<style>
+:root {
+    --grund: #111; --leiste: #1c1c1c; --knopf: #2c2c2c; --text: #eee; --gold: #e0a526;
+    --weiss: #f4f1ea; --weiss-an: #f2c25a; --schwarz-an: #b07818;
+}
+html, body { margin: 0; height: 100%; background: var(--grund); color: var(--text);
+    font-family: -apple-system, system-ui, sans-serif; overflow: hidden;
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent; }
+body { display: flex; flex-direction: column; box-sizing: border-box;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+
+/* Leiste oben */
+#leiste { display: flex; align-items: center; gap: 6px; padding: 4px 6px; background: var(--leiste);
+    flex: none; touch-action: none; }
+button { font: inherit; color: var(--text); background: var(--knopf); border: 0; border-radius: 10px;
+    min-width: 48px; height: 46px; font-size: 22px; padding: 0 10px; touch-action: manipulation; cursor: pointer; }
+button:active { background: #444; }
+:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+#lage { flex: 1; text-align: center; font-size: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#hilfeKnopf { border-radius: 50%; width: 46px; padding: 0; }
+body.hilfemodus #hilfeKnopf { background: var(--gold); color: #111; }
+
+/* Tastatur: unterste Reihe = tiefste Töne */
+#tasten { flex: 1; display: flex; flex-direction: column-reverse; gap: 8px; padding: 6px; min-height: 0; touch-action: none; }
+.reihe { flex: 1; position: relative; min-height: 0; }
+.w { position: absolute; top: 0; bottom: 0; background: var(--weiss); border: 1px solid #8a8780;
+    border-radius: 0 0 8px 8px; box-sizing: border-box; display: flex; align-items: flex-end;
+    justify-content: center; color: #6a6660; padding-bottom: 6px; }
+.w.mitte { box-shadow: inset 0 -5px 0 var(--gold); }
+.s { position: absolute; top: 0; z-index: 2; box-sizing: border-box; border: 1px solid #000;
+    background: linear-gradient(#3a3a3a, #111 85%); border-radius: 0 0 6px 6px; }
+.w.an { background: var(--weiss-an); }
+.s.an { background: var(--schwarz-an); }
+.w span { pointer-events: none; }
+
+/* Einstellungen: halbe Fläche, Tasten daneben bleiben sichtbar und ändern sich live */
+#einst { position: fixed; z-index: 10; background: #1e1e1e; box-shadow: 0 0 30px #000;
+    overflow-y: auto; touch-action: pan-y; padding: 12px 16px 24px; box-sizing: border-box; display: none; }
+#einst.offen { display: block; }
+@media (orientation: landscape) { #einst { top: 0; bottom: 0; left: 0; width: 58%; } }
+@media (orientation: portrait) { #einst { top: 0; left: 0; right: 0; height: 58%; } }
+#einst h2 { font-size: 22px; margin: 4px 0 10px; display: flex; align-items: center; gap: 10px; }
+#einst h2 span { flex: 1; }
+.zeile { margin: 14px 0; }
+.zeile > label, .zeile > .titel { display: flex; justify-content: space-between; font-size: 19px; }
+.zeile b { color: var(--gold); font-weight: 600; }
+input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 46px; background: transparent; margin: 0; }
+input[type=range]::-webkit-slider-runnable-track { height: 8px; background: #555; border-radius: 4px; }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 36px; height: 36px; border-radius: 50%;
+    background: var(--gold); margin-top: -14px; }
+input[type=range]::-moz-range-thumb { width: 36px; height: 36px; border-radius: 50%; background: var(--gold); border: 0; }
+.wahl { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.wahl button { font-size: 18px; flex: 1 1 auto; }
+.wahl button[aria-pressed=true] { background: var(--gold); color: #111; }
+select { font: inherit; font-size: 18px; width: 100%; height: 46px; margin-top: 6px; background: var(--knopf); color: var(--text); border: 0; border-radius: 10px; }
+
+/* Hilfemodus */
+body.hilfemodus [data-hilfe] { outline: 2px dashed var(--gold); outline-offset: 3px; transition: outline-color .2s; }
+#blase { position: fixed; z-index: 20; left: 50%; bottom: 16px; transform: translateX(-50%); max-width: min(560px, 90vw);
+    background: #2a2416; border: 2px solid var(--gold); border-radius: 14px; padding: 12px 16px; font-size: 19px;
+    line-height: 1.35; display: none; }
+#blase.offen { display: block; }
+</style>
+</head>
+<body>
+<div id="leiste">
+    <button id="okRunter" data-hilfe="Alle Reihen eine Oktave tiefer." aria-label="Oktave tiefer">«</button>
+    <button id="tonRunter" data-hilfe="Alle Reihen eine weiße Taste tiefer." aria-label="Eine Taste tiefer">‹</button>
+    <div id="lage" data-hilfe="Tiefster und höchster Ton. c' ist das mittlere C (gelb unterstrichen).">C</div>
+    <button id="tonHoch" data-hilfe="Alle Reihen eine weiße Taste höher." aria-label="Eine Taste höher">›</button>
+    <button id="okHoch" data-hilfe="Alle Reihen eine Oktave höher." aria-label="Oktave höher">»</button>
+    <button id="einstKnopf" data-hilfe="Einstellungen: Tastenbreite, schwarze Tasten, Reihen, Klang. Gelten getrennt für quer und hochkant." aria-label="Einstellungen">⚙</button>
+    <button id="hilfeKnopf" aria-label="Hilfe">?</button>
+</div>
+<div id="tasten" data-hilfe="Tasten antippen, mit mehreren Fingern gleichzeitig. Über die Tasten wischen spielt jede Taste an. Der Bildschirm bleibt an, solange die Seite offen ist."></div>
+
+<div id="einst" role="dialog" aria-label="Einstellungen">
+    <h2><span id="einstTitel">Einstellungen</span><button id="fertig" data-hilfe="Schließt die Einstellungen (auch Esc).">Fertig</button></h2>
+    <div class="zeile" data-hilfe="Breite der weißen Tasten. Daraus ergibt sich, wie viele Tasten in eine Reihe passen.">
+        <label for="breite">Weiße Tasten <b id="breiteW"></b></label>
+        <input type="range" id="breite" min="28" max="120" step="1">
+    </div>
+    <div class="zeile" data-hilfe="Breite der schwarzen Tasten im Verhältnis zur weißen Taste.">
+        <label for="sBreite">Schwarz: Breite <b id="sBreiteW"></b></label>
+        <input type="range" id="sBreite" min="35" max="100" step="1">
+    </div>
+    <div class="zeile" data-hilfe="Länge der schwarzen Tasten im Verhältnis zur weißen Taste.">
+        <label for="sLaenge">Schwarz: Länge <b id="sLaengeW"></b></label>
+        <input type="range" id="sLaenge" min="35" max="100" step="1">
+    </div>
+    <div class="zeile" data-hilfe="Wie viele Tastenreihen übereinander.">
+        <div class="titel">Reihen</div>
+        <div class="wahl" id="reihenWahl"></div>
+    </div>
+    <div class="zeile" data-hilfe="Womit die nächste Reihe beginnt. Anschließend: wo die Reihe darunter aufhört. Oktave, Quinte, Quarte: so viel höher als der Anfang der Reihe darunter.">
+        <div class="titel">Nächste Reihe beginnt</div>
+        <div class="wahl" id="abstandWahl"></div>
+    </div>
+    <div class="zeile" data-hilfe="Klavier klingt aus wie ein Flügel. Weich hält den Ton, solange der Finger liegt, gut für Anfangstöne.">
+        <div class="titel">Klang</div>
+        <div class="wahl" id="klangWahl"></div>
+    </div>
+    <div class="zeile" data-hilfe="Lautstärke der Seite. Die Box und das iPhone haben ihre eigene.">
+        <label for="laut">Lautstärke <b id="lautW"></b></label>
+        <input type="range" id="laut" min="0" max="100" step="1">
+    </div>
+    <div class="zeile" data-hilfe="Welche weißen Tasten ihren Namen zeigen.">
+        <div class="titel">Tonnamen</div>
+        <div class="wahl" id="namenWahl"></div>
+    </div>
+    <div class="zeile" id="midiZeile" hidden data-hilfe="Schickt die Töne zusätzlich als MIDI an ein Gerät oder Programm. Am iPhone gibt es das nicht.">
+        <label for="midi">MIDI-Ausgang</label>
+        <select id="midi"><option value="">aus</option></select>
+    </div>
+    <div class="zeile">
+        <button id="zurueck" data-hilfe="Setzt die Einstellungen dieser Lage (quer oder hochkant) zurück.">Zurücksetzen</button>
+    </div>
+</div>
+<div id="blase" role="status"></div>
+
+<script>
+'use strict';
+const NAMEN = ['c', 'cis', 'd', 'dis', 'e', 'f', 'fis', 'g', 'gis', 'a', 'b', 'h'];
+const SCHWARZ = new Set([1, 3, 6, 8, 10]);
+const SPEICHER = 'klavier.einst';
+const STANDARD = {
+    quer: { breite: 56, sBreite: 60, sLaenge: 62, reihen: 2, abstand: 'anschluss', start: 36 },
+    hoch: { breite: 48, sBreite: 60, sLaenge: 62, reihen: 4, abstand: 12, start: 36 },
+    klang: 'klavier', laut: 80, namen: 'c', midi: ''
+};
+const $ = id => document.getElementById(id);
+const tasten = $('tasten');
+
+let s = JSON.parse(JSON.stringify(STANDARD));
+try {
+    const g = JSON.parse(localStorage.getItem(SPEICHER) || 'null');
+    if (g) s = { ...s, ...g, quer: { ...s.quer, ...g.quer }, hoch: { ...s.hoch, ...g.hoch } };
+} catch (e) {}
+function sichern() { try { localStorage.setItem(SPEICHER, JSON.stringify(s)); } catch (e) {} }
+
+const lageName = () => innerWidth > innerHeight ? 'quer' : 'hoch';
+const prof = () => s[lageName()];
+
+// Tonname nach Helmholtz: c' = mittleres C (MIDI 60), c = 48, C = 36, C, = 24
+function tonName(n) {
+    const o = Math.floor(n / 12) - 4, b = NAMEN[n % 12];
+    if (o >= 0) return b + "'".repeat(o);
+    return b[0].toUpperCase() + b.slice(1) + ','.repeat(-o - 1);
+}
+const weissAb = n => { while (SCHWARZ.has(n % 12)) n--; return n; };
+const weissAuf = n => { while (SCHWARZ.has(n % 12)) n++; return n; };
+
+/* ---------- Tastatur aufbauen ---------- */
+function bauen() {
+    const p = prof();
+    tasten.innerHTML = '';
+    const reihen = [];
+    for (let r = 0; r < p.reihen; r++) {
+        const d = document.createElement('div');
+        d.className = 'reihe';
+        tasten.appendChild(d);
+        reihen.push(d);
+    }
+    let start = p.start, tiefst = start, hoechst = start, vorigEnde = start;
+    reihen.forEach((reihe, r) => {
+        if (r > 0) start = p.abstand === 'anschluss' ? weissAuf(vorigEnde + 1) : weissAb(start + p.abstand);
+        const W = reihe.clientWidth, H = reihe.clientHeight;
+        const anzahl = Math.max(3, Math.round(W / p.breite)), ww = W / anzahl;
+        const fs = Math.max(11, Math.min(ww * 0.42, H * 0.16));
+        const weisse = [];
+        for (let n = start; weisse.length < anzahl; n++) if (!SCHWARZ.has(n % 12)) weisse.push(n);
+        weisse.forEach((n, i) => {
+            const k = document.createElement('div');
+            k.className = 'w' + (n === 60 ? ' mitte' : '');
+            k.dataset.note = n;
+            k.style.left = (i * ww) + 'px';
+            k.style.width = (ww + 1) + 'px';
+            if (s.namen === 'alle' || (s.namen === 'c' && n % 12 === 0)) {
+                const t = document.createElement('span');
+                t.textContent = tonName(n);
+                t.style.fontSize = fs + 'px';
+                k.appendChild(t);
+            }
+            reihe.appendChild(k);
+            if (i < anzahl - 1 && SCHWARZ.has((n + 1) % 12)) {
+                const bw = ww * p.sBreite / 100;
+                const b = document.createElement('div');
+                b.className = 's';
+                b.dataset.note = n + 1;
+                b.style.left = ((i + 1) * ww - bw / 2) + 'px';
+                b.style.width = bw + 'px';
+                b.style.height = (H * p.sLaenge / 100) + 'px';
+                reihe.appendChild(b);
+            }
+        });
+        vorigEnde = weisse[weisse.length - 1];
+        tiefst = Math.min(tiefst, weisse[0]);
+        hoechst = Math.max(hoechst, vorigEnde);
+    });
+    $('lage').textContent = tonName(tiefst) + ' – ' + tonName(hoechst);
+    gedrueckt.forEach((z, n) => { if (z > 0) markieren(n, true); });
+}
+let bauPlan = 0;
+function neuBauen() { cancelAnimationFrame(bauPlan); bauPlan = requestAnimationFrame(bauen); }
+addEventListener('resize', () => { neuBauen(); if ($('einst').classList.contains('offen')) einstZeigen(); });
+
+/* ---------- Klang ---------- */
+let ctx = null, master = null;
+function audio() {
+    if (ctx) return ctx;
+    ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+    master = ctx.createGain();
+    master.gain.value = s.laut / 100;
+    const comp = ctx.createDynamicsCompressor();
+    master.connect(comp).connect(ctx.destination);
+    return ctx;
+}
+function entsperren() {
+    // iPhone: auch mit Stummschalter hörbar (iOS 17+)
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+    audio();
+    if (ctx.state !== 'running') ctx.resume();
+    wachHalten();
+}
+// Bildschirm bleibt an, solange die Seite vorne ist
+let sperre = null;
+async function wachHalten() {
+    try { if (!sperre && navigator.wakeLock) { sperre = await navigator.wakeLock.request('screen'); sperre.addEventListener('release', () => { sperre = null; }); } } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') wachHalten(); else alleAus();
+});
+
+function stimme(n) {
+    const c = audio(), t = c.currentTime, f = 440 * Math.pow(2, (n - 69) / 12);
+    const g = c.createGain(), oscs = [];
+    g.connect(master);
+    if (s.klang === 'klavier') {
+        // Teiltöne mit leichter Spreizung, hohe klingen schneller aus, Klang wird dabei dunkler
+        const T = Math.min(6, Math.max(0.9, 3.4 * Math.pow(261.6 / f, 0.5)));
+        const lp = c.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.setValueAtTime(Math.min(16000, f * 10), t);
+        lp.frequency.setTargetAtTime(Math.min(16000, f * 3), t, T / 3);
+        lp.connect(g);
+        [1, 0.55, 0.33, 0.2, 0.12, 0.07].forEach((a, i) => {
+            const k = i + 1;
+            if (f * k > 15000) return;
+            const o = c.createOscillator(), og = c.createGain();
+            o.frequency.value = f * k * Math.sqrt(1 + 0.0004 * k * k);
+            og.gain.setValueAtTime(0, t);
+            og.gain.linearRampToValueAtTime(a, t + 0.005);
+            og.gain.setTargetAtTime(0, t + 0.005, T / (1 + 0.6 * i) / 3);
+            o.connect(og).connect(lp);
+            o.start(t);
+            oscs.push(o);
+        });
+        g.gain.value = 0.22;
+    } else {
+        // Weich: Dreieck und Sinus, hält, solange der Finger liegt
+        const o1 = c.createOscillator(), o2 = c.createOscillator(), m = c.createGain();
+        o1.type = 'triangle'; o1.frequency.value = f;
+        o2.frequency.value = f * 2; m.gain.value = 0.15;
+        o1.connect(g); o2.connect(m).connect(g);
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(0.3, t + 0.04);
+        o1.start(t); o2.start(t);
+        oscs.push(o1, o2);
+    }
+    midiSenden(0x90, n, 100);
+    return {
+        aus() {
+            const t2 = c.currentTime;
+            if (g.gain.cancelAndHoldAtTime) g.gain.cancelAndHoldAtTime(t2);
+            else { g.gain.cancelScheduledValues(t2); g.gain.setValueAtTime(g.gain.value, t2); }
+            g.gain.setTargetAtTime(0, t2, s.klang === 'klavier' ? 0.07 : 0.09);
+            oscs.forEach(o => o.stop(t2 + 0.8));
+            midiSenden(0x80, n, 0);
+        }
+    };
+}
+
+/* ---------- MIDI (nur wo der Browser es kann) ---------- */
+let midiZugang = null, midiAus = null;
+function midiSenden(a, n, v) { try { if (midiAus) midiAus.send([a, n, v]); } catch (e) {} }
+async function midiLaden() {
+    if (!navigator.requestMIDIAccess) return;
+    $('midiZeile').hidden = false;
+    try {
+        midiZugang = await navigator.requestMIDIAccess();
+        const sel = $('midi');
+        sel.length = 1;
+        midiZugang.outputs.forEach(o => sel.add(new Option(o.name, o.id)));
+        sel.value = s.midi;
+        midiAus = s.midi ? midiZugang.outputs.get(s.midi) || null : null;
+    } catch (e) {}
+}
+$('midi').addEventListener('change', e => {
+    s.midi = e.target.value; sichern();
+    midiAus = midiZugang && s.midi ? midiZugang.outputs.get(s.midi) || null : null;
+});
+
+/* ---------- Finger ---------- */
+const finger = new Map();     // pointerId -> { n, st }
+const gedrueckt = new Map();  // Note -> Anzahl Finger
+function markieren(n, an) {
+    tasten.querySelectorAll('[data-note="' + n + '"]').forEach(k => k.classList.toggle('an', an));
+}
+function noteBei(x, y) {
+    const el = document.elementFromPoint(x, y);
+    const k = el && el.closest && el.closest('[data-note]');
+    return k && tasten.contains(k) ? +k.dataset.note : null;
+}
+function drueck(id, n) {
+    gedrueckt.set(n, (gedrueckt.get(n) || 0) + 1);
+    markieren(n, true);
+    finger.set(id, { n, st: stimme(n) });
+}
+function loslass(id) {
+    const f = finger.get(id);
+    if (!f) return;
+    finger.delete(id);
+    f.st.aus();
+    const z = (gedrueckt.get(f.n) || 1) - 1;
+    gedrueckt.set(f.n, z);
+    if (z <= 0) markieren(f.n, false);
+}
+function alleAus() { [...finger.keys()].forEach(loslass); }
+
+tasten.addEventListener('pointerdown', e => {
+    if (document.body.classList.contains('hilfemodus')) return;
+    e.preventDefault();
+    entsperren();
+    const n = noteBei(e.clientX, e.clientY);
+    if (n !== null) drueck(e.pointerId, n);
+});
+tasten.addEventListener('pointermove', e => {
+    if (!finger.has(e.pointerId)) return;
+    const n = noteBei(e.clientX, e.clientY);
+    if (n === finger.get(e.pointerId).n) return;
+    loslass(e.pointerId);
+    if (n !== null) drueck(e.pointerId, n);
+});
+['pointerup', 'pointercancel'].forEach(t => tasten.addEventListener(t, e => loslass(e.pointerId)));
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('contextmenu', e => e.preventDefault());
+
+/* ---------- Leiste ---------- */
+function schieben(fn) {
+    const p = prof();
+    p.start = Math.min(96, Math.max(21, fn(p.start)));
+    sichern(); bauen();
+}
+$('okRunter').onclick = () => schieben(n => n - 12);
+$('okHoch').onclick = () => schieben(n => n + 12);
+$('tonRunter').onclick = () => schieben(n => weissAb(n - 1));
+$('tonHoch').onclick = () => schieben(n => weissAuf(n + 1));
+
+/* ---------- Einstellungen ---------- */
+function wahl(id, werte, aktuell, setzen) {
+    const box = $(id);
+    box.innerHTML = '';
+    werte.forEach(([wert, text]) => {
+        const b = document.createElement('button');
+        b.textContent = text;
+        b.setAttribute('aria-pressed', String(wert === aktuell));
+        b.onclick = () => { setzen(wert); sichern(); bauen(); einstZeigen(); };
+        box.appendChild(b);
+    });
+}
+function einstZeigen() {
+    const p = prof(), quer = lageName() === 'quer';
+    $('einstTitel').textContent = quer ? 'Querformat' : 'Hochformat';
+    $('breite').value = p.breite; $('breiteW').textContent = p.breite + ' px';
+    $('sBreite').value = p.sBreite; $('sBreiteW').textContent = p.sBreite + ' %';
+    $('sLaenge').value = p.sLaenge; $('sLaengeW').textContent = p.sLaenge + ' %';
+    $('laut').value = s.laut; $('lautW').textContent = s.laut + ' %';
+    wahl('reihenWahl', (quer ? [1, 2, 3] : [3, 4, 5]).map(r => [r, String(r)]), p.reihen, v => { p.reihen = v; });
+    wahl('abstandWahl', [['anschluss', 'Anschließend'], [12, 'Oktave'], [7, 'Quinte'], [5, 'Quarte']], p.abstand, v => { p.abstand = v; });
+    wahl('klangWahl', [['klavier', 'Klavier'], ['weich', 'Weich (hält)']], s.klang, v => { s.klang = v; });
+    wahl('namenWahl', [['c', 'Nur C'], ['alle', 'Alle'], ['keine', 'Keine']], s.namen, v => { s.namen = v; });
+}
+[['breite', ' px'], ['sBreite', ' %'], ['sLaenge', ' %']].forEach(([id, einheit]) => {
+    $(id).addEventListener('input', e => {
+        prof()[id] = +e.target.value;
+        $(id + 'W').textContent = e.target.value + einheit;
+        sichern(); neuBauen();
+    });
+});
+$('laut').addEventListener('input', e => {
+    s.laut = +e.target.value;
+    $('lautW').textContent = s.laut + ' %';
+    if (master) master.gain.value = s.laut / 100;
+    sichern();
+});
+function einstAuf() { einstZeigen(); $('einst').classList.add('offen'); $('fertig').focus(); midiLaden(); }
+function einstZu() { $('einst').classList.remove('offen'); $('einstKnopf').focus(); }
+$('einstKnopf').onclick = () => $('einst').classList.contains('offen') ? einstZu() : einstAuf();
+$('fertig').onclick = einstZu;
+$('zurueck').onclick = () => {
+    s[lageName()] = { ...STANDARD[lageName()] };
+    sichern(); bauen(); einstZeigen();
+};
+
+/* ---------- Hilfemodus ---------- */
+const blase = $('blase');
+function hilfeAus() { document.body.classList.remove('hilfemodus'); blase.classList.remove('offen'); }
+$('hilfeKnopf').onclick = () => {
+    if (document.body.classList.toggle('hilfemodus')) {
+        blase.textContent = 'Hilfe: Tippe auf ein umrandetes Feld. Esc oder ? beendet.';
+        blase.classList.add('offen');
+    } else hilfeAus();
+};
+['pointerdown', 'click'].forEach(typ => document.addEventListener(typ, e => {
+    if (!document.body.classList.contains('hilfemodus')) return;
+    if (e.target.closest('#hilfeKnopf')) return;
+    const el = e.target.closest('[data-hilfe]');
+    e.preventDefault(); e.stopPropagation();
+    if (el && typ === 'click') { blase.textContent = el.dataset.hilfe; blase.classList.add('offen'); }
+}, true));
+
+document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if (document.body.classList.contains('hilfemodus')) hilfeAus();
+    else if ($('einst').classList.contains('offen')) einstZu();
+});
+
+bauen();
+</script>
+</body>
+</html>
