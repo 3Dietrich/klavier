@@ -174,7 +174,11 @@ try {
 } catch (e) {}
 function sichern() { try { localStorage.setItem(SPEICHER, JSON.stringify(s)); } catch (e) {} }
 
-const geraetLage = () => innerWidth > innerHeight ? 'quer' : 'hoch';
+// Gerätelage über die Media-Query: innerWidth/innerHeight sind auf dem iPhone beim Drehen
+// kurz veraltet. Maße vom (nie gedrehten) html-Element.
+const querMQ = matchMedia('(orientation: landscape)');
+const geraetLage = () => querMQ.matches ? 'quer' : 'hoch';
+const sichtB = () => document.documentElement.clientWidth, sichtH = () => document.documentElement.clientHeight;
 const lageName = () => s.ausrichtung === 'auto' ? geraetLage() : s.ausrichtung;
 // Gewählte Ausrichtung umsetzen: weicht sie vom Gerät ab, wird die Seite gedreht
 function ausrichten() {
@@ -182,8 +186,8 @@ function ausrichten() {
     html.classList.toggle('gedreht', dreh);
     html.classList.toggle('lage-quer', ziel === 'quer');
     html.classList.toggle('lage-hoch', ziel === 'hoch');
-    document.body.style.width = dreh ? innerHeight + 'px' : '';
-    document.body.style.height = dreh ? innerWidth + 'px' : '';
+    document.body.style.width = dreh ? sichtH() + 'px' : '';
+    document.body.style.height = dreh ? sichtB() + 'px' : '';
 }
 const prof = () => s[lageName()];
 
@@ -248,7 +252,18 @@ function bauen() {
 }
 let bauPlan = 0;
 function neuBauen() { cancelAnimationFrame(bauPlan); bauPlan = requestAnimationFrame(bauen); }
-addEventListener('resize', () => { ausrichten(); neuBauen(); if ($('einst').classList.contains('offen')) einstZeigen(); });
+// Nach dem Drehen mehrfach nachziehen, bis das iPhone seine Maße fertig gemeldet hat
+let nachZeiten = [];
+function lageGeaendert() {
+    nachZeiten.forEach(clearTimeout);
+    nachZeiten = [0, 150, 400, 900].map(ms => setTimeout(() => {
+        ausrichten(); bauen();
+        if ($('einst').classList.contains('offen')) einstZeigen();
+    }, ms));
+}
+addEventListener('resize', lageGeaendert);
+addEventListener('orientationchange', lageGeaendert);
+querMQ.addEventListener('change', lageGeaendert);
 
 /* ---------- Klang ---------- */
 let ctx = null, master = null;
