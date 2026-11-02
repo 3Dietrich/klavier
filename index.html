@@ -52,7 +52,7 @@ body.hilfemodus #hilfeKnopf { background: var(--gold); color: #111; }
 
 /* Einstellungen: halbe Fläche, Tasten daneben bleiben sichtbar und ändern sich live */
 #einst { position: fixed; z-index: 10; background: #1e1e1e; box-shadow: 0 0 30px #000;
-    overflow-y: auto; touch-action: pan-y; padding: 12px 16px 24px; box-sizing: border-box; display: none; }
+    overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; padding: 12px 14px 16px; box-sizing: border-box; display: none; }
 #einst.offen { display: block; }
 html.lage-quer #einst { top: 0; bottom: 0; left: 0; width: 58%; }
 html.lage-hoch #einst { top: 0; left: 0; right: 0; height: 58%; }
@@ -61,25 +61,34 @@ html.lage-hoch #einst { top: 0; left: 0; right: 0; height: 58%; }
 html.gedreht body { position: fixed; top: 0; left: 0; transform-origin: top left;
     transform: rotate(90deg) translateY(-100%); }
 /* Kopf mit Fertig bleibt beim Scrollen oben stehen */
-#einst h2 { font-size: 22px; margin: -12px -16px 10px; padding: 10px 16px; display: flex; align-items: center; gap: 10px;
+#einst h2 { font-size: 22px; margin: -12px -14px 4px; padding: 6px 14px; display: flex; align-items: center; gap: 10px;
     position: sticky; top: -12px; background: #1e1e1e; z-index: 1; box-shadow: 0 6px 8px -6px #000; }
-#fertig { min-width: 120px; height: 52px; background: var(--gold); color: #111; font-weight: 600; }
+#fertig { min-width: 120px; height: 46px; background: var(--gold); color: #111; font-weight: 600; }
 /* Tipp neben die Einstellungen schließt sie */
 #fang { position: fixed; inset: 0; z-index: 9; display: none; }
 #fang.offen { display: block; }
 #einst h2 span { flex: 1; }
-.zeile { margin: 14px 0; }
-.zeile > label, .zeile > .titel { display: flex; justify-content: space-between; font-size: 19px; }
+.zeile { display: grid; grid-template-columns: minmax(6.5em, 30%) 1fr; align-items: center; gap: 10px;
+    padding: 5px 0; border-bottom: 1px solid #2a2a2a; }
+.zeile:last-child { border-bottom: 0; }
+.zeile.knoepfe { display: flex; padding-top: 10px; }
+[hidden] { display: none !important; }
+.zeile > label, .zeile > .titel { display: flex; flex-direction: column; font-size: 18px; line-height: 1.15; }
 .zeile b { color: var(--gold); font-weight: 600; }
-input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 46px; background: transparent; margin: 0; }
+/* Regler: die ganze Zeile ist Ziehfläche. Waagrecht ziehen stellt ein, senkrecht scrollt
+   die Einstellungen (der Regler selbst fängt keine Finger, sonst hängt das Scrollen an ihm fest) */
+.zeile.regel { touch-action: pan-y; cursor: ew-resize; }
+.zeile.regel input { pointer-events: none; }
+.zeile.regel.zieht input::-webkit-slider-thumb { box-shadow: 0 0 0 8px #e0a52655; }
+input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 44px; background: transparent; margin: 0; }
 input[type=range]::-webkit-slider-runnable-track { height: 8px; background: #555; border-radius: 4px; }
 input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 36px; height: 36px; border-radius: 50%;
     background: var(--gold); margin-top: -14px; }
 input[type=range]::-moz-range-thumb { width: 36px; height: 36px; border-radius: 50%; background: var(--gold); border: 0; }
-.wahl { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-.wahl button { font-size: 18px; flex: 1 1 auto; }
+.wahl { display: flex; flex-wrap: wrap; gap: 6px; }
+.wahl button { font-size: 18px; flex: 1 1 auto; height: 44px; padding: 0 8px; }
 .wahl button[aria-pressed=true] { background: var(--gold); color: #111; }
-select { font: inherit; font-size: 18px; width: 100%; height: 46px; margin-top: 6px; background: var(--knopf); color: var(--text); border: 0; border-radius: 10px; }
+select { font: inherit; font-size: 18px; width: 100%; height: 44px; background: var(--knopf); color: var(--text); border: 0; border-radius: 10px; }
 
 /* Hilfemodus */
 body.hilfemodus [data-hilfe] { outline: 2px dashed var(--gold); outline-offset: 3px; transition: outline-color .2s; }
@@ -113,11 +122,11 @@ body.hilfemodus [data-hilfe] { outline: 2px dashed var(--gold); outline-offset: 
         <input type="range" id="breite" min="28" max="120" step="1">
     </div>
     <div class="zeile" data-hilfe="Breite der schwarzen Tasten im Verhältnis zur weißen Taste.">
-        <label for="sBreite">Schwarz: Breite <b id="sBreiteW"></b></label>
+        <label for="sBreite">Schwarz breit <b id="sBreiteW"></b></label>
         <input type="range" id="sBreite" min="35" max="100" step="1">
     </div>
     <div class="zeile" data-hilfe="Länge der schwarzen Tasten im Verhältnis zur weißen Taste.">
-        <label for="sLaenge">Schwarz: Länge <b id="sLaengeW"></b></label>
+        <label for="sLaenge">Schwarz lang <b id="sLaengeW"></b></label>
         <input type="range" id="sLaenge" min="35" max="100" step="1">
     </div>
     <div class="zeile" data-hilfe="Wie viele Tastenreihen übereinander.">
@@ -125,7 +134,7 @@ body.hilfemodus [data-hilfe] { outline: 2px dashed var(--gold); outline-offset: 
         <div class="wahl" id="reihenWahl"></div>
     </div>
     <div class="zeile" data-hilfe="Womit die nächste Reihe beginnt. Anschließend: wo die Reihe darunter aufhört. Oktave, Quinte, Quarte: so viel höher als der Anfang der Reihe darunter.">
-        <div class="titel">Nächste Reihe beginnt</div>
+        <div class="titel">Nächste Reihe</div>
         <div class="wahl" id="abstandWahl"></div>
     </div>
     <div class="zeile" data-hilfe="Klavier klingt aus wie ein Flügel. Weich hält den Ton, solange der Finger liegt, gut für Anfangstöne.">
@@ -148,7 +157,7 @@ body.hilfemodus [data-hilfe] { outline: 2px dashed var(--gold); outline-offset: 
         <label for="midi">MIDI-Ausgang</label>
         <select id="midi"><option value="">aus</option></select>
     </div>
-    <div class="zeile wahl">
+    <div class="zeile wahl knoepfe">
         <button id="neuStart" data-hilfe="Baut den Klang komplett neu auf. Für den Fall, dass trotz Antippen nichts mehr zu hören ist. Meist passiert das von selbst beim nächsten Ton.">Klang neu starten</button>
         <button id="zurueck"data-hilfe="Setzt die Einstellungen dieser Lage (quer oder hochkant) zurück.">Zurücksetzen</button>
     </div>
@@ -599,6 +608,39 @@ function einstZeigen() {
         $(id + 'W').textContent = e.target.value + einheit;
         sichern(); neuBauen();
     });
+});
+// Regler über die ganze Zeile ziehen: erst wenn der Finger klar waagrecht läuft, verstellt er den Wert
+// (relativ, wie ein langer Ziehweg). Senkrecht gibt der Browser den Finger ans Scrollen ab (pointercancel)
+// Bei gedrehter Seite (fest Hoch/Breit, Gerät anders gehalten) läuft die Seiten-Waagrechte senkrecht über den Schirm
+const seitenPunkt = e => document.documentElement.classList.contains('gedreht')
+    ? { x: e.clientY, y: -e.clientX } : { x: e.clientX, y: e.clientY };
+document.querySelectorAll('.zeile input[type=range]').forEach(inp => {
+    const zeile = inp.closest('.zeile');
+    zeile.classList.add('regel');
+    zeile.dataset.hilfe += ' Zum Einstellen irgendwo in der Zeile waagrecht ziehen, senkrecht wischen scrollt.';
+    let z = null;
+    zeile.addEventListener('pointerdown', e => {
+        if (document.body.classList.contains('hilfemodus')) return;
+        const p = seitenPunkt(e);
+        z = { id: e.pointerId, x: p.x, y: p.y, wert: +inp.value, an: false };
+    });
+    zeile.addEventListener('pointermove', e => {
+        if (!z || e.pointerId !== z.id) return;
+        const p = seitenPunkt(e), dx = p.x - z.x, dy = p.y - z.y;
+        if (!z.an) {
+            if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { z = null; return; }
+            if (Math.abs(dx) < 8) return;
+            z.an = true; z.x = p.x;
+            zeile.classList.add('zieht');
+            try { zeile.setPointerCapture(e.pointerId); } catch (err) {}
+            return;
+        }
+        const min = +inp.min, max = +inp.max, w = inp.getBoundingClientRect().width || 200;
+        const neu = Math.round(Math.min(max, Math.max(min, z.wert + (p.x - z.x) / w * (max - min))));
+        if (neu !== +inp.value) { inp.value = neu; inp.dispatchEvent(new Event('input')); }
+    });
+    const ende = () => { z = null; zeile.classList.remove('zieht'); };
+    ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(t => zeile.addEventListener(t, ende));
 });
 $('laut').addEventListener('input', e => {
     s.laut = +e.target.value;
