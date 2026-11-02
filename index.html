@@ -141,6 +141,10 @@ body.hilfemodus [data-hilfe] { outline: 2px dashed var(--gold); outline-offset: 
         <div class="titel">Klang</div>
         <div class="wahl" id="klangWahl"></div>
     </div>
+    <div class="zeile" data-hilfe="Wie viele Töne höchstens gleichzeitig klingen. Kommt einer dazu, verstummt zuerst der älteste schon losgelassene Ton, sonst der älteste gehaltene. Weniger Stimmen heißt weniger Rechenarbeit fürs iPhone.">
+        <div class="titel">Stimmen</div>
+        <div class="wahl" id="stimmenWahl"></div>
+    </div>
     <div class="zeile" data-hilfe="Schärfe des gewählten Klangs: links rund und weich, rechts laut, hell und durchsetzungsfähig. Jeder Klang merkt sich seine eigene Einstellung.">
         <label for="schaerfe">Schärfe <b id="schaerfeW"></b></label>
         <input type="range" id="schaerfe" min="0" max="100" step="1">
@@ -172,7 +176,7 @@ const SPEICHER = 'klavier.einst';
 const STANDARD = {
     quer: { breite: 56, sBreite: 60, sLaenge: 62, reihen: 2, abstand: 'anschluss', start: 36 },
     hoch: { breite: 48, sBreite: 60, sLaenge: 62, reihen: 4, abstand: 12, start: 36 },
-    klang: 'klavier', laut: 80, namen: 'c', midi: '', ausrichtung: 'auto',
+    klang: 'klavier', laut: 80, namen: 'c', midi: '', ausrichtung: 'auto', stimmen: 8,
     schaerfe: { klavier: 30, weich: 20 }
 };
 const $ = id => document.getElementById(id);
@@ -353,7 +357,7 @@ function kurve(x) {
 // Noch klingende Stimmen je Ton. Ein neuer Anschlag dämpft den alten Ton derselben Höhe
 // (wie die Saite beim Klavier), sonst addieren sich beide je nach Phasenlage mal laut, mal schwach
 const klingend = new Map();
-const aktiv = [], MAX_STIMMEN = 16;
+const aktiv = [];   // klingende Stimmen, älteste zuerst
 const freq = n => 440 * Math.pow(2, (n - 69) / 12);
 const klavierDauer = f => Math.min(8, Math.max(1.8, 4 * Math.pow(261.6 / f, 0.4)));
 
@@ -435,13 +439,22 @@ function vorrechnenBald() {
     }, 300);
 }
 
+// Stimmenklau: höchstens so viele Stimmen wie eingestellt. Zuerst verstummt der älteste schon
+// losgelassene (ausklingende) Ton, erst dann der älteste gehaltene
+function stimmenKappen(max) {
+    while (aktiv.length > max) {
+        const i = aktiv.findIndex(v => v.frei);
+        aktiv.splice(i >= 0 ? i : 0, 1)[0].daempfen();
+    }
+}
 function stimme(n) {
     const c = audio(), t = c.currentTime, f = freq(n);
     (klingend.get(n) || new Set()).forEach(v => v.daempfen());
     const x = (s.schaerfe[s.klang] ?? 30) / 100;   // 0 = rund und weich, 1 = laut und hell
     const g = c.createGain(), oscs = [];
     // Live gespielte Stimmen laufen über ihre eigene Sättigung (im Puffer steckt sie schon drin)
-    const ueberSaettigung = () => { const sat = c.createWaveShaper(); sat.curve = kurve(x); g.connect(sat).connect(master); };
+    let sat = null;
+    const ueberSaettigung = () => { sat = c.createWaveShaper(); sat.curve = kurve(x); g.connect(sat).connect(master); };
     const fertig = s.klang === 'klavier' && puffer.get(n + '|' + s.schaerfe.klavier);
     if (fertig) {
         const q = c.createBufferSource();
@@ -453,6 +466,9 @@ function stimme(n) {
         // Puffer noch nicht da: dieses Mal live spielen, für das nächste Mal rechnen
         ueberSaettigung();
         oscs.push(...klavierTeiltoene(c, g, f, x, t));
+        // Auch bei liegendem Finger nach dem Ausklingen beenden, sonst rechnen die Oszillatoren stumm weiter
+        const schluss = t + Math.min(7, 1.8 * klavierDauer(f));
+        oscs.forEach(o => o.stop(schluss));
         klavierRechnen(n, s.schaerfe.klavier);
     } else {
         ueberSaettigung();
@@ -481,6 +497,7 @@ function stimme(n) {
         oscs.forEach(o => { try { o.stop(ende); } catch (e) {} });
     }
     const v = {
+        get frei() { return losgelassen; },
         aus() {
             if (losgelassen) return;
             losgelassen = true;
@@ -491,10 +508,14 @@ function stimme(n) {
     };
     if (!klingend.has(n)) klingend.set(n, new Set());
     klingend.get(n).add(v);
-    // Höchstens MAX_STIMMEN gleichzeitig: bei vielen ausklingenden Tönen den ältesten abdämpfen
+    stimmenKappen(s.stimmen - 1);
     aktiv.push(v);
-    if (aktiv.length > MAX_STIMMEN) aktiv.shift().daempfen();
-    oscs[0].onended = () => { klingend.get(n)?.delete(v); const i = aktiv.indexOf(v); if (i >= 0) aktiv.splice(i, 1); };
+    oscs[0].onended = () => {
+        klingend.get(n)?.delete(v);
+        const i = aktiv.indexOf(v); if (i >= 0) aktiv.splice(i, 1);
+        // Kette lösen, sonst bleiben Filter und Sättigung im Klanggraphen hängen und kosten weiter Rechenzeit
+        try { g.disconnect(); if (sat) sat.disconnect(); } catch (e) {}
+    };
     return v;
 }
 
@@ -600,6 +621,7 @@ function einstZeigen() {
     wahl('reihenWahl', (quer ? [1, 2, 3] : [3, 4, 5]).map(r => [r, String(r)]), p.reihen, v => { p.reihen = v; });
     wahl('abstandWahl', [['anschluss', 'Anschließend'], [12, 'Oktave'], [7, 'Quinte'], [5, 'Quarte']], p.abstand, v => { p.abstand = v; });
     wahl('klangWahl', [['klavier', 'Klavier'], ['weich', 'Weich (hält)']], s.klang, v => { s.klang = v; });
+    wahl('stimmenWahl', [4, 6, 8, 12, 16].map(z => [z, String(z)]), s.stimmen, v => { s.stimmen = v; stimmenKappen(v); });
     wahl('namenWahl', [['c', 'Nur C'], ['alle', 'Alle'], ['keine', 'Keine']], s.namen, v => { s.namen = v; });
 }
 [['breite', ' px'], ['sBreite', ' %'], ['sLaenge', ' %']].forEach(([id, einheit]) => {
