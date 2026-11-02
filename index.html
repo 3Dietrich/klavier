@@ -155,6 +155,10 @@ body.hilfemodus [data-hilfe] { outline: 2px dashed var(--gold); outline-offset: 
         <div class="titel">Stimmen</div>
         <div class="wahl" id="stimmenWahl"></div>
     </div>
+    <div class="zeile" data-hilfe="Verdichter: gleicht laut und leise aus, Töne reagieren dabei auf das, was vorher klang. Nach einer Pause schluckt er aber den ersten Anschlag kurz. Aus: jeder Ton klingt gleich, ohne Schlucken.">
+        <div class="titel">Verdichter</div>
+        <div class="wahl" id="verdichterWahl"></div>
+    </div>
     <div class="zeile" data-hilfe="Schärfe des gewählten Klangs: links rund und weich, rechts laut, hell und durchsetzungsfähig. Jeder Klang merkt sich seine eigene Einstellung.">
         <label for="schaerfe">Schärfe <b id="schaerfeW"></b></label>
         <input type="range" id="schaerfe" min="0" max="100" step="1">
@@ -181,14 +185,14 @@ body.hilfemodus [data-hilfe] { outline: 2px dashed var(--gold); outline-offset: 
 <script>
 'use strict';
 // Stand der Seite, setzt hochladen.sh beim Hochladen auf Datum_Uhrzeit
-const VERSION = '20261103_0053';
+const VERSION = '20261103_0056';
 const NAMEN = ['c', 'cis', 'd', 'dis', 'e', 'f', 'fis', 'g', 'gis', 'a', 'b', 'h'];
 const SCHWARZ = new Set([1, 3, 6, 8, 10]);
 const SPEICHER = 'klavier.einst';
 const STANDARD = {
     quer: { breite: 56, sBreite: 60, sLaenge: 62, reihen: 2, abstand: 'anschluss', start: 36 },
     hoch: { breite: 48, sBreite: 60, sLaenge: 62, reihen: 4, abstand: 12, start: 36 },
-    klang: 'klavier', laut: 80, namen: 'c', midi: '', ausrichtung: 'auto', stimmen: 8,
+    klang: 'klavier', laut: 80, namen: 'c', midi: '', ausrichtung: 'auto', stimmen: 8, verdichter: false,
     schaerfe: { klavier: 30, weich: 20 }
 };
 const $ = id => document.getElementById(id);
@@ -300,7 +304,12 @@ addEventListener('orientationchange', lageGeaendert);
 querMQ.addEventListener('change', lageGeaendert);
 
 /* ---------- Klang ---------- */
-let ctx = null, master = null, kaputt = false;
+let ctx = null, master = null, kaputt = false, wegKomp = null, wegDirekt = null;
+function verdichterSetzen() {
+    if (!wegKomp) return;
+    wegKomp.gain.value = s.verdichter ? 1 : 0;
+    wegDirekt.gain.value = s.verdichter ? 0 : 1.4;
+}
 function audio() {
     if (ctx) return ctx;
     ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
@@ -310,13 +319,20 @@ function audio() {
     ctx.onstatechange = () => { if (ctx === meins && (meins.state === 'interrupted' || meins.state === 'closed')) kaputt = true; };
     master = ctx.createGain();
     master.gain.value = s.laut / 100;
+    // Verdichter (Einstellung): Web Audio hebt nach einer Pause automatisch an und regelt beim
+    // ersten Ton hörbar herunter ("Schluck"); Töne reagieren dafür auf das, was vorher klang.
+    // Aus: direkter Weg, etwa 3 dB angehoben, damit es ähnlich laut bleibt
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = -10; comp.knee.value = 6; comp.ratio.value = 4;
     comp.attack.value = 0.003; comp.release.value = 0.15;
+    wegKomp = ctx.createGain(); wegDirekt = ctx.createGain();
+    verdichterSetzen();
     // Weiche Begrenzung am Ende: Akkorde mit viel Schärfe übersteuern nicht hart
     const grenze = ctx.createWaveShaper();
     grenze.curve = kurve(0.45);
-    master.connect(comp).connect(grenze).connect(ctx.destination);
+    master.connect(comp).connect(wegKomp).connect(grenze);
+    master.connect(wegDirekt).connect(grenze);
+    grenze.connect(ctx.destination);
     letzteZeit = -1;
     return ctx;
 }
@@ -638,6 +654,7 @@ function einstZeigen() {
     wahl('reihenWahl', (quer ? [1, 2, 3] : [3, 4, 5]).map(r => [r, String(r)]), p.reihen, v => { p.reihen = v; });
     wahl('abstandWahl', [['anschluss', 'Anschließend'], [12, 'Oktave'], [7, 'Quinte'], [5, 'Quarte']], p.abstand, v => { p.abstand = v; });
     wahl('klangWahl', [['klavier', 'Klavier'], ['weich', 'Weich (hält)']], s.klang, v => { s.klang = v; });
+    wahl('verdichterWahl', [[false, 'Aus'], [true, 'An']], s.verdichter, v => { s.verdichter = v; verdichterSetzen(); });
     wahl('stimmenWahl', [4, 6, 8, 12, 16].map(z => [z, String(z)]), s.stimmen, v => { s.stimmen = v; stimmenKappen(v); });
     wahl('namenWahl', [['c', 'Nur C'], ['alle', 'Alle'], ['keine', 'Keine']], s.namen, v => { s.namen = v; });
 }
