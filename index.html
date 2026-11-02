@@ -68,6 +68,7 @@ html.gedreht body { position: fixed; top: 0; left: 0; transform-origin: top left
 #fang { position: fixed; inset: 0; z-index: 9; display: none; }
 #fang.offen { display: block; }
 #einst h2 span { flex: 1; }
+#version { font-size: 15px; font-weight: 400; color: #999; font-variant-numeric: tabular-nums; }
 .zeile { display: grid; grid-template-columns: minmax(6.5em, 30%) 1fr; align-items: center; gap: 10px;
     padding: 5px 0; border-bottom: 1px solid #2a2a2a; }
 .zeile:last-child { border-bottom: 0; }
@@ -112,7 +113,7 @@ body.hilfemodus [data-hilfe] { outline: 2px dashed var(--gold); outline-offset: 
 
 <div id="fang"></div>
 <div id="einst" role="dialog" aria-label="Einstellungen">
-    <h2><span id="einstTitel">Einstellungen</span><button id="fertig" data-hilfe="Schließt die Einstellungen. Tipp neben die Einstellungen oder Esc schließt sie auch.">✕ Fertig</button></h2>
+    <h2><span id="einstTitel">Einstellungen</span><small id="version" data-hilfe="Stand der Seite: Tag und Uhrzeit, wann sie hochgeladen wurde. Zum Nachsehen, ob das iPhone schon die neue Fassung hat."></small><button id="fertig" data-hilfe="Schließt die Einstellungen. Tipp neben die Einstellungen oder Esc schließt sie auch.">✕ Fertig</button></h2>
     <div class="zeile" data-hilfe="Auto folgt dem iPhone. Hoch oder Breit hält die Tastatur fest, egal wie das iPhone liegt, auch bei gesperrter Bildschirmdrehung. Ist das iPhone anders gehalten, steht die Seite gedreht.">
         <div class="titel">Ausrichtung</div>
         <div class="wahl" id="ausrichtungWahl"></div>
@@ -170,6 +171,8 @@ body.hilfemodus [data-hilfe] { outline: 2px dashed var(--gold); outline-offset: 
 
 <script>
 'use strict';
+// Stand der Seite, setzt hochladen.sh beim Hochladen auf Datum_Uhrzeit
+const VERSION = '20261102_2235';
 const NAMEN = ['c', 'cis', 'd', 'dis', 'e', 'f', 'fis', 'g', 'gis', 'a', 'b', 'h'];
 const SCHWARZ = new Set([1, 3, 6, 8, 10]);
 const SPEICHER = 'klavier.einst';
@@ -181,6 +184,7 @@ const STANDARD = {
 };
 const $ = id => document.getElementById(id);
 const tasten = $('tasten');
+$('version').textContent = VERSION;
 
 let s = JSON.parse(JSON.stringify(STANDARD));
 try {
