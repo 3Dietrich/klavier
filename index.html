@@ -52,8 +52,12 @@ body.hilfemodus #hilfeKnopf { background: var(--gold); color: #111; }
 #einst { position: fixed; z-index: 10; background: #1e1e1e; box-shadow: 0 0 30px #000;
     overflow-y: auto; touch-action: pan-y; padding: 12px 16px 24px; box-sizing: border-box; display: none; }
 #einst.offen { display: block; }
-@media (orientation: landscape) { #einst { top: 0; bottom: 0; left: 0; width: 58%; } }
-@media (orientation: portrait) { #einst { top: 0; left: 0; right: 0; height: 58%; } }
+html.lage-quer #einst { top: 0; bottom: 0; left: 0; width: 58%; }
+html.lage-hoch #einst { top: 0; left: 0; right: 0; height: 58%; }
+/* Ausrichtung fest gewählt und Gerät anders gehalten: ganze Seite um 90° im Uhrzeigersinn drehen
+   (Breite/Höhe setzt JS). Feste Elemente drehen mit, weil body transformiert ist. */
+html.gedreht body { position: fixed; top: 0; left: 0; transform-origin: top left;
+    transform: rotate(90deg) translateY(-100%); }
 #einst h2 { font-size: 22px; margin: 4px 0 10px; display: flex; align-items: center; gap: 10px; }
 #einst h2 span { flex: 1; }
 .zeile { margin: 14px 0; }
@@ -91,6 +95,10 @@ body.hilfemodus [data-hilfe] { outline: 2px dashed var(--gold); outline-offset: 
 
 <div id="einst" role="dialog" aria-label="Einstellungen">
     <h2><span id="einstTitel">Einstellungen</span><button id="fertig" data-hilfe="Schließt die Einstellungen (auch Esc).">Fertig</button></h2>
+    <div class="zeile" data-hilfe="Auto folgt dem iPhone. Hoch oder Breit hält die Tastatur fest, egal wie das iPhone liegt, auch bei gesperrter Bildschirmdrehung. Ist das iPhone anders gehalten, steht die Seite gedreht.">
+        <div class="titel">Ausrichtung</div>
+        <div class="wahl" id="ausrichtungWahl"></div>
+    </div>
     <div class="zeile" data-hilfe="Breite der weißen Tasten. Daraus ergibt sich, wie viele Tasten in eine Reihe passen.">
         <label for="breite">Weiße Tasten <b id="breiteW"></b></label>
         <input type="range" id="breite" min="28" max="120" step="1">
@@ -145,7 +153,7 @@ const SPEICHER = 'klavier.einst';
 const STANDARD = {
     quer: { breite: 56, sBreite: 60, sLaenge: 62, reihen: 2, abstand: 'anschluss', start: 36 },
     hoch: { breite: 48, sBreite: 60, sLaenge: 62, reihen: 4, abstand: 12, start: 36 },
-    klang: 'klavier', laut: 80, namen: 'c', midi: '',
+    klang: 'klavier', laut: 80, namen: 'c', midi: '', ausrichtung: 'auto',
     schaerfe: { klavier: 30, weich: 20 }
 };
 const $ = id => document.getElementById(id);
@@ -159,7 +167,17 @@ try {
 } catch (e) {}
 function sichern() { try { localStorage.setItem(SPEICHER, JSON.stringify(s)); } catch (e) {} }
 
-const lageName = () => innerWidth > innerHeight ? 'quer' : 'hoch';
+const geraetLage = () => innerWidth > innerHeight ? 'quer' : 'hoch';
+const lageName = () => s.ausrichtung === 'auto' ? geraetLage() : s.ausrichtung;
+// Gewählte Ausrichtung umsetzen: weicht sie vom Gerät ab, wird die Seite gedreht
+function ausrichten() {
+    const html = document.documentElement, ziel = lageName(), dreh = ziel !== geraetLage();
+    html.classList.toggle('gedreht', dreh);
+    html.classList.toggle('lage-quer', ziel === 'quer');
+    html.classList.toggle('lage-hoch', ziel === 'hoch');
+    document.body.style.width = dreh ? innerHeight + 'px' : '';
+    document.body.style.height = dreh ? innerWidth + 'px' : '';
+}
 const prof = () => s[lageName()];
 
 // Tonname nach Helmholtz: c' = mittleres C (MIDI 60), c = 48, C = 36, C, = 24
@@ -223,7 +241,7 @@ function bauen() {
 }
 let bauPlan = 0;
 function neuBauen() { cancelAnimationFrame(bauPlan); bauPlan = requestAnimationFrame(bauen); }
-addEventListener('resize', () => { neuBauen(); if ($('einst').classList.contains('offen')) einstZeigen(); });
+addEventListener('resize', () => { ausrichten(); neuBauen(); if ($('einst').classList.contains('offen')) einstZeigen(); });
 
 /* ---------- Klang ---------- */
 let ctx = null, master = null;
@@ -411,7 +429,8 @@ function wahl(id, werte, aktuell, setzen) {
 }
 function einstZeigen() {
     const p = prof(), quer = lageName() === 'quer';
-    $('einstTitel').textContent = quer ? 'Querformat' : 'Hochformat';
+    $('einstTitel').textContent = quer ? 'Breit' : 'Hoch';
+    wahl('ausrichtungWahl', [['auto', 'Auto'], ['hoch', 'Hoch'], ['quer', 'Breit']], s.ausrichtung, v => { s.ausrichtung = v; ausrichten(); });
     $('breite').value = p.breite; $('breiteW').textContent = p.breite + ' px';
     $('sBreite').value = p.sBreite; $('sBreiteW').textContent = p.sBreite + ' %';
     $('sLaenge').value = p.sLaenge; $('sLaengeW').textContent = p.sLaenge + ' %';
@@ -472,6 +491,7 @@ document.addEventListener('keydown', e => {
     else if ($('einst').classList.contains('offen')) einstZu();
 });
 
+ausrichten();
 bauen();
 </script>
 </body>
