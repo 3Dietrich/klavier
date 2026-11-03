@@ -22,12 +22,13 @@ html, body { margin: 0; height: 100%; background: var(--grund); color: var(--tex
     -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
     -webkit-tap-highlight-color: transparent; }
 body { display: flex; flex-direction: column; box-sizing: border-box;
-    padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
-/* Kein Rand, wo nichts verdeckt wird: unten (Home-Strich) nie, quer nur auf der Seite der Kamera-Aussparung,
-   gedreht gar keiner (die Ränder des Geräts liegen dort quer zur Seite) */
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+/* Rand nur, wo er gebraucht wird: quer nur auf der Seite der Kamera-Aussparung. Am Home-Strich bleibt
+   immer ein Streifen frei, sonst greift beim Wischen vom Rand die Home-Geste des iPhones und die Seite
+   bekommt die Finger nicht mehr. Gedreht liegt der Home-Strich an der rechten Seitenkante */
 html.kerbe-links body { padding-right: 0; }
 html.kerbe-rechts body { padding-left: 0; }
-html.gedreht body { padding: 0; }
+html.gedreht body { padding: 0 env(safe-area-inset-bottom) 0 0; }
 
 /* Leiste oben */
 /* Keine Textauswahl und keine Lupe beim langen Drücken (iPhone) */
@@ -185,7 +186,7 @@ body.hilfemodus [data-hilfe] { outline: 2px dashed var(--gold); outline-offset: 
 <script>
 'use strict';
 // Stand der Seite, setzt hochladen.sh beim Hochladen auf Datum_Uhrzeit
-const VERSION = '20261103_0101';
+const VERSION = '20261103_0106';
 const NAMEN = ['c', 'cis', 'd', 'dis', 'e', 'f', 'fis', 'g', 'gis', 'a', 'b', 'h'];
 const SCHWARZ = new Set([1, 3, 6, 8, 10]);
 const SPEICHER = 'klavier.einst';
@@ -260,8 +261,9 @@ function bauen() {
             const k = document.createElement('div');
             k.className = 'w' + (n === 60 ? ' mitte' : '');
             k.dataset.note = n;
-            k.style.left = (i * ww) + 'px';
-            k.style.width = (ww + 1) + 'px';
+            // dunkle Fuge von 1,5 px zwischen den weißen Tasten
+            k.style.left = (i * ww + 0.75) + 'px';
+            k.style.width = (ww - 1.5) + 'px';
             if (s.namen === 'alle' || (s.namen === 'c' && n % 12 === 0)) {
                 const t = document.createElement('span');
                 t.textContent = tonName(n);
@@ -603,7 +605,10 @@ function loslass(id) {
     gedrueckt.set(f.n, z);
     if (z <= 0) markieren(f.n, false);
 }
-function alleAus() { [...finger.keys()].forEach(loslass); }
+function alleAus() { [...finger.keys()].forEach(loslass); aufTasten.clear(); }
+// Finger, die auf der Tastatur liegen, auch wenn sie gerade über einer Fuge sind (keine Taste, kein Ton).
+// Sonst bricht ein Wisch an der ersten Fuge zwischen zwei Tasten oder Reihen ab
+const aufTasten = new Set();
 
 // iPhone: ohne das erscheint beim langen Drücken die Lupe
 ['touchstart', 'touchmove', 'touchend'].forEach(t => tasten.addEventListener(t, e => e.preventDefault(), { passive: false }));
@@ -611,17 +616,18 @@ tasten.addEventListener('pointerdown', e => {
     if (document.body.classList.contains('hilfemodus')) return;
     e.preventDefault();
     entsperren();
+    aufTasten.add(e.pointerId);
     const n = noteBei(e.clientX, e.clientY);
     if (n !== null) drueck(e.pointerId, n);
 });
 tasten.addEventListener('pointermove', e => {
-    if (!finger.has(e.pointerId)) return;
+    if (!aufTasten.has(e.pointerId)) return;
     const n = noteBei(e.clientX, e.clientY);
-    if (n === finger.get(e.pointerId).n) return;
+    if (n === (finger.get(e.pointerId)?.n ?? null)) return;
     loslass(e.pointerId);
     if (n !== null) drueck(e.pointerId, n);
 });
-['pointerup', 'pointercancel'].forEach(t => tasten.addEventListener(t, e => loslass(e.pointerId)));
+['pointerup', 'pointercancel'].forEach(t => tasten.addEventListener(t, e => { aufTasten.delete(e.pointerId); loslass(e.pointerId); }));
 document.addEventListener('gesturestart', e => e.preventDefault());
 document.addEventListener('contextmenu', e => e.preventDefault());
 
