@@ -58,7 +58,10 @@ body.hilfemodus #hilfeKnopf { background: var(--gold); color: #111; }
     border-left-color: #b4b4b4; border-right-color: #b4b4b4; }
 .w.an { background: var(--weiss-an); }
 .s.an { background: var(--schwarz-an); }
-.w span { pointer-events: none; }
+.w span { pointer-events: none; text-align: center; line-height: 1.05; }
+.w span small { font-size: 70%; }
+.w.aus { background: #3c3b39; border-color: #2c2b29; }
+.s.aus { background: #1a1a1a; border-color: #111; opacity: .6; }
 
 /* Einstellungen: halbe Fläche, Tasten daneben bleiben sichtbar und ändern sich live */
 #einst { position: fixed; z-index: 10; background: #1e1e1e; box-shadow: 0 0 30px #000;
@@ -168,10 +171,6 @@ body.hilfemodus [data-hilfe] { outline: 2px dashed var(--gold); outline-offset: 
         <label for="laut">Lautstärke <b id="lautW"></b></label>
         <input type="range" id="laut" min="0" max="100" step="1">
     </div>
-    <div class="zeile" data-hilfe="Welche weißen Tasten ihren Namen zeigen.">
-        <div class="titel">Tonnamen</div>
-        <div class="wahl" id="namenWahl"></div>
-    </div>
     <div class="zeile" id="midiZeile" hidden data-hilfe="Schickt die Töne zusätzlich als MIDI an ein Gerät oder Programm. Am iPhone gibt es das nicht.">
         <label for="midi">MIDI-Ausgang</label>
         <select id="midi"><option value="">aus</option></select>
@@ -186,14 +185,14 @@ body.hilfemodus [data-hilfe] { outline: 2px dashed var(--gold); outline-offset: 
 <script>
 'use strict';
 // Stand der Seite, setzt hochladen.sh beim Hochladen auf Datum_Uhrzeit
-const VERSION = '20261103_0106';
+const VERSION = '20261103_0118';
 const NAMEN = ['c', 'cis', 'd', 'dis', 'e', 'f', 'fis', 'g', 'gis', 'a', 'b', 'h'];
 const SCHWARZ = new Set([1, 3, 6, 8, 10]);
 const SPEICHER = 'klavier.einst';
 const STANDARD = {
-    quer: { breite: 56, sBreite: 60, sLaenge: 62, reihen: 2, abstand: 'anschluss', start: 36 },
-    hoch: { breite: 48, sBreite: 60, sLaenge: 62, reihen: 4, abstand: 12, start: 36 },
-    klang: 'klavier', laut: 80, namen: 'c', midi: '', ausrichtung: 'auto', stimmen: 8, verdichten: true,
+    quer: { breite: 56, sBreite: 60, sLaenge: 62, reihen: 'auto', abstand: 'anschluss', start: 36 },
+    hoch: { breite: 48, sBreite: 60, sLaenge: 62, reihen: 'auto', abstand: 12, start: 36 },
+    klang: 'klavier', laut: 80, midi: '', stand: 2, ausrichtung: 'auto', stimmen: 8, verdichten: true,
     schaerfe: { klavier: 30, weich: 20 }
 };
 const $ = id => document.getElementById(id);
@@ -205,7 +204,15 @@ try {
     const g = JSON.parse(localStorage.getItem(SPEICHER) || 'null');
     if (g) s = { ...s, ...g, quer: { ...s.quer, ...g.quer }, hoch: { ...s.hoch, ...g.hoch },
                  schaerfe: { ...s.schaerfe, ...g.schaerfe } };
+    // Stand 2 (3.11.): Reihen automatisch statt fester Zahl
+    if (g && !(g.stand >= 2)) { s.quer.reihen = s.hoch.reihen = 'auto'; s.stand = 2; }
 } catch (e) {}
+
+// Tonumfang: unten bis etwa 10 Hz (E-1 = 10,3 Hz). Oben nur so hoch, dass der Grundton unter einem
+// Viertel der Abtastrate bleibt: mit 4-fach überabgetasteter Sättigung landen dann auch deren
+// Obertöne nicht als Spiegelfrequenzen im Hörbereich (48 kHz: bis fis'''''' 11,8 kHz)
+const TIEFST = 4;
+const hoechsterTon = () => Math.floor(69 + 12 * Math.log2((ctx ? ctx.sampleRate : 48000) / 4 / 440));
 function sichern() { try { localStorage.setItem(SPEICHER, JSON.stringify(s)); } catch (e) {} }
 
 // Gerätelage über die Media-Query: innerWidth/innerHeight sind auf dem iPhone beim Drehen
@@ -242,14 +249,19 @@ const weissAuf = n => { while (SCHWARZ.has(n % 12)) n++; return n; };
 function bauen() {
     const p = prof();
     tasten.innerHTML = '';
+    // Auto: so viele Reihen, wie Platz ist, solange die weißen Tasten noch etwas länger als breit sind
+    const ABSTAND = 6, PLATZ = tasten.clientHeight - 6;
+    const anzahlReihen = p.reihen === 'auto'
+        ? Math.max(1, Math.floor((PLATZ + ABSTAND) / (p.breite * 1.25 + ABSTAND))) : p.reihen;
+    const oben = hoechsterTon();
     const reihen = [];
-    for (let r = 0; r < p.reihen; r++) {
+    for (let r = 0; r < anzahlReihen; r++) {
         const d = document.createElement('div');
         d.className = 'reihe';
         tasten.appendChild(d);
         reihen.push(d);
     }
-    let start = p.start, tiefst = start, hoechst = start, vorigEnde = start;
+    let start = p.start, tiefst = Infinity, hoechst = -Infinity, vorigEnde = start;
     reihen.forEach((reihe, r) => {
         if (r > 0) start = p.abstand === 'anschluss' ? weissAuf(vorigEnde + 1) : weissAb(start + p.abstand);
         const W = reihe.clientWidth, H = reihe.clientHeight;
@@ -257,25 +269,34 @@ function bauen() {
         const fs = Math.max(11, Math.min(ww * 0.42, H * 0.16));
         const weisse = [];
         for (let n = start; weisse.length < anzahl; n++) if (!SCHWARZ.has(n % 12)) weisse.push(n);
+        // Außerhalb des Tonumfangs: ausgegraut und stumm (ohne data-note)
+        const spielbar = n => n >= TIEFST && n <= oben;
         weisse.forEach((n, i) => {
             const k = document.createElement('div');
-            k.className = 'w' + (n === 60 ? ' mitte' : '');
-            k.dataset.note = n;
+            k.className = 'w' + (n === 60 ? ' mitte' : '') + (spielbar(n) ? '' : ' aus');
+            if (spielbar(n)) {
+                k.dataset.note = n;
+                tiefst = Math.min(tiefst, n); hoechst = Math.max(hoechst, n);
+            }
             // dunkle Fuge von 1,5 px zwischen den weißen Tasten
             k.style.left = (i * ww + 0.75) + 'px';
             k.style.width = (ww - 1.5) + 'px';
-            if (s.namen === 'alle' || (s.namen === 'c' && n % 12 === 0)) {
+            // Name nur an den C; ganz unten (unter C1, 32,7 Hz) dazu die Frequenz
+            const f = freq(n), zeilen = [];
+            if (n % 12 === 0) zeilen.push(tonName(n));
+            if (f < 32.6 && spielbar(n)) zeilen.push((f < 20 ? f.toFixed(1).replace('.', ',') : Math.round(f)) + ' Hz');
+            if (zeilen.length) {
                 const t = document.createElement('span');
-                t.textContent = tonName(n);
-                t.style.fontSize = fs + 'px';
+                t.innerHTML = zeilen.map(z => z.replace(' Hz', '<small> Hz</small>')).join('<br>');
+                t.style.fontSize = (zeilen.length > 1 || n % 12 ? Math.min(fs, ww / 3.2) : fs) + 'px';
                 k.appendChild(t);
             }
             reihe.appendChild(k);
             if (i < anzahl - 1 && SCHWARZ.has((n + 1) % 12)) {
                 const bw = ww * p.sBreite / 100;
                 const b = document.createElement('div');
-                b.className = 's';
-                b.dataset.note = n + 1;
+                b.className = 's' + (spielbar(n + 1) ? '' : ' aus');
+                if (spielbar(n + 1)) b.dataset.note = n + 1;
                 b.style.left = ((i + 1) * ww - bw / 2) + 'px';
                 b.style.width = bw + 'px';
                 b.style.height = (H * p.sLaenge / 100) + 'px';
@@ -283,10 +304,8 @@ function bauen() {
             }
         });
         vorigEnde = weisse[weisse.length - 1];
-        tiefst = Math.min(tiefst, weisse[0]);
-        hoechst = Math.max(hoechst, vorigEnde);
     });
-    $('lage').textContent = tonName(tiefst) + ' – ' + tonName(hoechst);
+    $('lage').textContent = hoechst >= tiefst ? tonName(tiefst) + ' – ' + tonName(hoechst) : '–';
     gedrueckt.forEach((z, n) => { if (z > 0) markieren(n, true); });
     vorrechnenBald();
 }
@@ -336,12 +355,14 @@ function audio() {
     const vor = ctx.createGain(), grenze = ctx.createWaveShaper();
     vor.gain.value = 0.45;
     grenze.curve = kurve(0.45);
+    grenze.oversample = '2x';
     lautstaerke = ctx.createGain();
     lautstaerke.gain.value = s.laut / 100;
     master.connect(comp).connect(wegKomp).connect(vor);
     master.connect(wegDirekt).connect(vor);
     vor.connect(grenze).connect(lautstaerke).connect(ctx.destination);
     letzteZeit = -1;
+    neuBauen();   // Obergrenze hängt von der echten Abtastrate ab
     return ctx;
 }
 // Alten Klang wegwerfen und frisch aufbauen (innerhalb eines Antippens, sonst bleibt er am iPhone stumm)
@@ -439,18 +460,20 @@ function klavierTeiltoene(c, g, f, x, t) {
    bei Akkorden die Rechenkraft aus und es knackst */
 const puffer = new Map();     // "Note|Schärfe" -> AudioBuffer
 const inArbeit = new Map();   // gleicher Schlüssel -> Promise
-const MAX_PUFFER = 48;
+const MAX_PUFFER = 96;
 function klavierRechnen(n, schaerfe) {
     const key = n + '|' + schaerfe;
     if (puffer.has(key)) return Promise.resolve(puffer.get(key));
     if (inArbeit.has(key)) return inArbeit.get(key);
     const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
     if (!OAC) return Promise.resolve(null);
-    const f = freq(n), x = schaerfe / 100, rate = ctx ? ctx.sampleRate : 48000;
-    const dauer = Math.min(7, 1.8 * klavierDauer(f));
+    // Tiefe Töne mit halber Abtastrate (spart Speicher, ihr Klang reicht nicht so hoch)
+    const f = freq(n), x = schaerfe / 100, rate = (ctx ? ctx.sampleRate : 48000) / (f < 300 ? 2 : 1);
+    const dauer = Math.min(6, 1.6 * klavierDauer(f));
     const oc = new OAC(1, Math.ceil(dauer * rate), rate);
     const g = oc.createGain(), sat = oc.createWaveShaper(), aus = oc.createGain();
     sat.curve = kurve(x);
+    sat.oversample = '4x';   // Obertöne der Sättigung ohne Spiegelfrequenzen
     g.connect(sat).connect(aus).connect(oc.destination);
     klavierTeiltoene(oc, g, f, x, 0);
     // Pufferende sanft ausblenden
@@ -472,9 +495,11 @@ function vorrechnenBald() {
     vorPlan = setTimeout(async () => {
         if (s.klang !== 'klavier') return;
         const lauf = ++vorLauf, schaerfe = s.schaerfe.klavier;
-        const noten = [...new Set([...tasten.querySelectorAll('[data-note]')].map(k => +k.dataset.note))];
+        // Von der Mitte (c') nach außen; vorgerechnet wird nur, solange Platz ist, ohne andere zu verdrängen
+        const noten = [...new Set([...tasten.querySelectorAll('[data-note]')].map(k => +k.dataset.note))]
+            .sort((a, b) => Math.abs(a - 60) - Math.abs(b - 60));
         for (const n of noten) {
-            if (lauf !== vorLauf) return;
+            if (lauf !== vorLauf || puffer.size >= MAX_PUFFER) return;
             await klavierRechnen(n, schaerfe);
         }
     }, 300);
@@ -495,8 +520,10 @@ function stimme(n) {
     const g = c.createGain(), oscs = [];
     // Live gespielte Stimmen laufen über ihre eigene Sättigung (im Puffer steckt sie schon drin)
     let sat = null;
-    const ueberSaettigung = () => { sat = c.createWaveShaper(); sat.curve = kurve(x); g.connect(sat).connect(master); };
-    const fertig = s.klang === 'klavier' && puffer.get(n + '|' + s.schaerfe.klavier);
+    const ueberSaettigung = () => { sat = c.createWaveShaper(); sat.curve = kurve(x); sat.oversample = '2x'; g.connect(sat).connect(master); };
+    const pkey = n + '|' + s.schaerfe.klavier;
+    const fertig = s.klang === 'klavier' && puffer.get(pkey);
+    if (fertig) { puffer.delete(pkey); puffer.set(pkey, fertig); }   // zuletzt gespielt = zuletzt verdrängt
     if (fertig) {
         const q = c.createBufferSource();
         q.buffer = fertig;
@@ -634,7 +661,7 @@ document.addEventListener('contextmenu', e => e.preventDefault());
 /* ---------- Leiste ---------- */
 function schieben(fn) {
     const p = prof();
-    p.start = Math.min(96, Math.max(21, fn(p.start)));
+    p.start = Math.min(weissAb(hoechsterTon()), Math.max(TIEFST, fn(p.start)));
     sichern(); bauen();
 }
 $('okRunter').onclick = () => schieben(n => n - 12);
@@ -663,12 +690,11 @@ function einstZeigen() {
     $('sLaenge').value = p.sLaenge; $('sLaengeW').textContent = p.sLaenge + ' %';
     $('laut').value = s.laut; $('lautW').textContent = s.laut + ' %';
     $('schaerfe').value = s.schaerfe[s.klang]; $('schaerfeW').textContent = s.schaerfe[s.klang] + ' %';
-    wahl('reihenWahl', (quer ? [1, 2, 3] : [3, 4, 5]).map(r => [r, String(r)]), p.reihen, v => { p.reihen = v; });
+    wahl('reihenWahl', [['auto', 'Auto'], ...(quer ? [1, 2, 3, 4] : [3, 4, 5, 6, 8]).map(r => [r, String(r)])], p.reihen, v => { p.reihen = v; });
     wahl('abstandWahl', [['anschluss', 'Anschließend'], [12, 'Oktave'], [7, 'Quinte'], [5, 'Quarte']], p.abstand, v => { p.abstand = v; });
     wahl('klangWahl', [['klavier', 'Klavier'], ['weich', 'Weich (hält)']], s.klang, v => { s.klang = v; });
     wahl('verdichterWahl', [[false, 'Aus'], [true, 'An']], s.verdichten, v => { s.verdichten = v; verdichterSetzen(); });
     wahl('stimmenWahl', [4, 6, 8, 12, 16].map(z => [z, String(z)]), s.stimmen, v => { s.stimmen = v; stimmenKappen(v); });
-    wahl('namenWahl', [['c', 'Nur C'], ['alle', 'Alle'], ['keine', 'Keine']], s.namen, v => { s.namen = v; });
 }
 [['breite', ' px'], ['sBreite', ' %'], ['sLaenge', ' %']].forEach(([id, einheit]) => {
     $(id).addEventListener('input', e => {
