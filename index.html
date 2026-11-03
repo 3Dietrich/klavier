@@ -155,7 +155,7 @@ body.hilfemodus [data-hilfe] { outline: 2px dashed var(--gold); outline-offset: 
         <div class="titel">Stimmen</div>
         <div class="wahl" id="stimmenWahl"></div>
     </div>
-    <div class="zeile" data-hilfe="Verdichter: gleicht laut und leise aus, Töne reagieren dabei auf das, was vorher klang. Nach einer Pause schluckt er aber den ersten Anschlag kurz. Aus: jeder Ton klingt gleich, ohne Schlucken.">
+    <div class="zeile" data-hilfe="Verdichter: greift erst, wenn mehrere Töne zusammen lauter werden als ein einzelner, und nimmt Akkorde etwas zurück. Ein einzelner Ton bleibt unberührt, auch der erste nach einer Pause.">
         <div class="titel">Verdichter</div>
         <div class="wahl" id="verdichterWahl"></div>
     </div>
@@ -185,14 +185,14 @@ body.hilfemodus [data-hilfe] { outline: 2px dashed var(--gold); outline-offset: 
 <script>
 'use strict';
 // Stand der Seite, setzt hochladen.sh beim Hochladen auf Datum_Uhrzeit
-const VERSION = '20261103_0056';
+const VERSION = '20261103_0101';
 const NAMEN = ['c', 'cis', 'd', 'dis', 'e', 'f', 'fis', 'g', 'gis', 'a', 'b', 'h'];
 const SCHWARZ = new Set([1, 3, 6, 8, 10]);
 const SPEICHER = 'klavier.einst';
 const STANDARD = {
     quer: { breite: 56, sBreite: 60, sLaenge: 62, reihen: 2, abstand: 'anschluss', start: 36 },
     hoch: { breite: 48, sBreite: 60, sLaenge: 62, reihen: 4, abstand: 12, start: 36 },
-    klang: 'klavier', laut: 80, namen: 'c', midi: '', ausrichtung: 'auto', stimmen: 8, verdichter: false,
+    klang: 'klavier', laut: 80, namen: 'c', midi: '', ausrichtung: 'auto', stimmen: 8, verdichten: true,
     schaerfe: { klavier: 30, weich: 20 }
 };
 const $ = id => document.getElementById(id);
@@ -304,11 +304,11 @@ addEventListener('orientationchange', lageGeaendert);
 querMQ.addEventListener('change', lageGeaendert);
 
 /* ---------- Klang ---------- */
-let ctx = null, master = null, kaputt = false, wegKomp = null, wegDirekt = null;
+let ctx = null, master = null, lautstaerke = null, kaputt = false, wegKomp = null, wegDirekt = null;
 function verdichterSetzen() {
     if (!wegKomp) return;
-    wegKomp.gain.value = s.verdichter ? 1 : 0;
-    wegDirekt.gain.value = s.verdichter ? 0 : 1.4;
+    wegKomp.gain.value = s.verdichten ? 1 : 0;
+    wegDirekt.gain.value = s.verdichten ? 0 : 1;
 }
 function audio() {
     if (ctx) return ctx;
@@ -317,29 +317,35 @@ function audio() {
     // und kommt oft nicht von selbst zurück -> beim nächsten Antippen neu aufbauen
     const meins = ctx;
     ctx.onstatechange = () => { if (ctx === meins && (meins.state === 'interrupted' || meins.state === 'closed')) kaputt = true; };
+    // Kette: Stimmen -> master (Sammelschiene) -> Verdichter oder direkt -> weiche Begrenzung -> Lautstärke.
+    // Die Lautstärke sitzt am Ende, damit Verdichter und Begrenzung immer gleich arbeiten
     master = ctx.createGain();
-    master.gain.value = s.laut / 100;
-    // Verdichter (Einstellung): Web Audio hebt nach einer Pause automatisch an und regelt beim
-    // ersten Ton hörbar herunter ("Schluck"); Töne reagieren dafür auf das, was vorher klang.
-    // Aus: direkter Weg, etwa 3 dB angehoben, damit es ähnlich laut bleibt
+    // Verdichter: Ein einzelner Ton erreicht höchstens 0 dB (gemessen über alle Lagen und Schärfen),
+    // die Schwelle liegt genau dort. Er greift also erst, wenn mehrere Töne zusammen lauter werden,
+    // und schluckt keinen ersten Anschlag nach einer Pause. Bei Schwelle 0 dB gibt es auch keine
+    // automatische Anhebung leiser Stellen
     const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -10; comp.knee.value = 6; comp.ratio.value = 4;
+    comp.threshold.value = 0; comp.knee.value = 6; comp.ratio.value = 8;
     comp.attack.value = 0.003; comp.release.value = 0.15;
     wegKomp = ctx.createGain(); wegDirekt = ctx.createGain();
     verdichterSetzen();
-    // Weiche Begrenzung am Ende: Akkorde mit viel Schärfe übersteuern nicht hart
-    const grenze = ctx.createWaveShaper();
+    // Weiche Begrenzung: davor um 7 dB abgesenkt, damit Summen bis +7 dB rund sättigen statt hart abzuschneiden
+    // (der WaveShaper kappt alles über 1 hart)
+    const vor = ctx.createGain(), grenze = ctx.createWaveShaper();
+    vor.gain.value = 0.45;
     grenze.curve = kurve(0.45);
-    master.connect(comp).connect(wegKomp).connect(grenze);
-    master.connect(wegDirekt).connect(grenze);
-    grenze.connect(ctx.destination);
+    lautstaerke = ctx.createGain();
+    lautstaerke.gain.value = s.laut / 100;
+    master.connect(comp).connect(wegKomp).connect(vor);
+    master.connect(wegDirekt).connect(vor);
+    vor.connect(grenze).connect(lautstaerke).connect(ctx.destination);
     letzteZeit = -1;
     return ctx;
 }
 // Alten Klang wegwerfen und frisch aufbauen (innerhalb eines Antippens, sonst bleibt er am iPhone stumm)
 function audioNeu() {
     const alt = ctx;
-    ctx = null; master = null; kaputt = false;
+    ctx = null; master = null; lautstaerke = null; kaputt = false;
     klingend.clear();
     aktiv.length = 0;
     finger.forEach(f => { f.st = { aus() {}, daempfen() {} }; });
@@ -654,7 +660,7 @@ function einstZeigen() {
     wahl('reihenWahl', (quer ? [1, 2, 3] : [3, 4, 5]).map(r => [r, String(r)]), p.reihen, v => { p.reihen = v; });
     wahl('abstandWahl', [['anschluss', 'Anschließend'], [12, 'Oktave'], [7, 'Quinte'], [5, 'Quarte']], p.abstand, v => { p.abstand = v; });
     wahl('klangWahl', [['klavier', 'Klavier'], ['weich', 'Weich (hält)']], s.klang, v => { s.klang = v; });
-    wahl('verdichterWahl', [[false, 'Aus'], [true, 'An']], s.verdichter, v => { s.verdichter = v; verdichterSetzen(); });
+    wahl('verdichterWahl', [[false, 'Aus'], [true, 'An']], s.verdichten, v => { s.verdichten = v; verdichterSetzen(); });
     wahl('stimmenWahl', [4, 6, 8, 12, 16].map(z => [z, String(z)]), s.stimmen, v => { s.stimmen = v; stimmenKappen(v); });
     wahl('namenWahl', [['c', 'Nur C'], ['alle', 'Alle'], ['keine', 'Keine']], s.namen, v => { s.namen = v; });
 }
@@ -701,7 +707,7 @@ document.querySelectorAll('.zeile input[type=range]').forEach(inp => {
 $('laut').addEventListener('input', e => {
     s.laut = +e.target.value;
     $('lautW').textContent = s.laut + ' %';
-    if (master) master.gain.value = s.laut / 100;
+    if (lautstaerke) lautstaerke.gain.value = s.laut / 100;
     sichern();
 });
 $('schaerfe').addEventListener('input', e => {
