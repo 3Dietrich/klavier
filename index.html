@@ -117,9 +117,9 @@ body.hilfemodus [data-hilfe] { outline: 2px dashed var(--gold); outline-offset: 
 <body>
 <div id="leiste">
     <button id="okRunter" data-hilfe="Alle Reihen eine Oktave tiefer." aria-label="Oktave tiefer">«</button>
-    <button id="tonRunter" data-hilfe="Alle Reihen eine weiße Taste tiefer." aria-label="Eine Taste tiefer">‹</button>
+    <button id="tonRunter" data-hilfe="Alle Reihen einen Halbton tiefer, die unterste Reihe kann so auch mit einer schwarzen Taste beginnen." aria-label="Einen Halbton tiefer">‹</button>
     <div id="lage" data-hilfe="Tiefster und höchster Ton. c' ist das mittlere C (gelb unterstrichen).">C</div>
-    <button id="tonHoch" data-hilfe="Alle Reihen eine weiße Taste höher." aria-label="Eine Taste höher">›</button>
+    <button id="tonHoch" data-hilfe="Alle Reihen einen Halbton höher." aria-label="Einen Halbton höher">›</button>
     <button id="okHoch" data-hilfe="Alle Reihen eine Oktave höher." aria-label="Oktave höher">»</button>
     <button id="einstKnopf" data-hilfe="Einstellungen: Tastenbreite, schwarze Tasten, Reihen, Klang. Gelten getrennt für quer und hochkant." aria-label="Einstellungen">⚙</button>
     <button id="hilfeKnopf" aria-label="Hilfe">?</button>
@@ -191,7 +191,7 @@ body.hilfemodus [data-hilfe] { outline: 2px dashed var(--gold); outline-offset: 
 <script>
 'use strict';
 // Stand der Seite, setzt hochladen.sh beim Hochladen auf Datum_Uhrzeit
-const VERSION = '20261106_1529';
+const VERSION = '20261106_1552';
 const NAMEN = ['c', 'cis', 'd', 'dis', 'e', 'f', 'fis', 'g', 'gis', 'a', 'b', 'h'];
 const SCHWARZ = new Set([1, 3, 6, 8, 10]);
 const SPEICHER = 'klavier.einst';
@@ -259,18 +259,21 @@ function bauen() {
     const p = prof();
     tasten.innerHTML = '';
     const ABSTAND = 6, PLATZ = tasten.clientHeight - 6, W = tasten.clientWidth - 6;
-    const anzahl = Math.max(3, Math.round(W / p.breite)), ww = W / anzahl;
+    const anzahl = Math.max(3, Math.round(W / p.breite)), wwStandard = W / anzahl;
     // Höchstens so viele Reihen, dass die weißen Tasten mindestens quadratisch bleiben.
     // Auto: so viele, dass sie noch etwas länger als breit sind
-    reihenMax = Math.max(1, Math.min(40, Math.floor((PLATZ + ABSTAND) / (ww + ABSTAND))));
-    const reihenAuto = Math.max(1, Math.min(reihenMax, Math.floor((PLATZ + ABSTAND) / (ww * 1.25 + ABSTAND))));
+    reihenMax = Math.max(1, Math.min(40, Math.floor((PLATZ + ABSTAND) / (wwStandard + ABSTAND))));
+    const reihenAuto = Math.max(1, Math.min(reihenMax, Math.floor((PLATZ + ABSTAND) / (wwStandard * 1.25 + ABSTAND))));
     const anzahlReihen = p.reihen === 'auto' ? reihenAuto : Math.min(reihenMax, p.reihen);
     $('reihen').max = reihenMax; $('reihen').value = anzahlReihen;
     $('reihenW').textContent = anzahlReihen;
     $('reihenAuto').setAttribute('aria-pressed', String(p.reihen === 'auto'));
 
     const oben = hoechsterTon(), wu = weissAuf(TIEFST), wo = weissAb(oben);
-    // Weiße Tasten aller Reihen, unterste Reihe ab dem Ton anfang
+    // Weiße Tasten aller Reihen, unterste Reihe ab dem Ton anfang. Beginnt eine Reihe mit einer
+    // schwarzen Taste (‹ › gehen in Halbtönen), steht sie in weisse.anfang. Oktavreihen bleiben auf
+    // demselben Ton (Fis bleibt Fis), Quinte und Quarte beginnen auf der weißen Taste darunter
+    const intervall = m => p.abstand === 12 ? m : weissAb(m);
     function plan(anfang) {
         const rs = [];
         let a = anfang;
@@ -281,12 +284,13 @@ function bauen() {
                 else {
                     // Anschließen: so viele Schritte hinauf, dass die Reihe kurz vor dem Ende der Reihe darunter beginnt
                     let k = 1;
-                    if (p.buendig) while (weissAb(a + (k + 1) * p.abstand) <= weissAuf(ende + 1)) k++;
-                    a = weissAb(a + k * p.abstand);
+                    if (p.buendig) while (intervall(a + (k + 1) * p.abstand) <= weissAuf(ende + 1)) k++;
+                    a = intervall(a + k * p.abstand);
                 }
             }
             const weisse = [];
             for (let n = a; weisse.length < anzahl; n++) if (!SCHWARZ.has(pc(n))) weisse.push(n);
+            weisse.anfang = a;
             rs.push(weisse);
         }
         return rs;
@@ -322,7 +326,25 @@ function bauen() {
     });
     reihen.forEach((reihe, r) => {
         const weisse = reihenPlan[r], H = reihe.clientHeight;
+        // Beginnt die Reihe schwarz (z.B. Fis), steht diese Taste ganz vorn und die weißen rücken um
+        // ihre halbe Breite nach rechts; damit die Reihe trotzdem voll bleibt, werden sie etwas schmaler
+        const vorne = SCHWARZ.has(pc(weisse.anfang));
+        const ww = vorne ? W / (anzahl + p.sBreite / 200) : wwStandard, bw = ww * p.sBreite / 100;
+        const x0 = vorne ? bw / 2 : 0;
         const fs = Math.max(11, Math.min(ww * 0.42, H * 0.16));
+        const schwarz = (n, links) => {
+            const b = document.createElement('div');
+            b.className = 's' + (spielbar(n) ? '' : ' aus');
+            if (spielbar(n)) {
+                b.dataset.note = n;
+                tiefst = Math.min(tiefst, n); hoechst = Math.max(hoechst, n);
+            }
+            b.style.left = links + 'px';
+            b.style.width = bw + 'px';
+            b.style.height = (H * p.sLaenge / 100) + 'px';
+            reihe.appendChild(b);
+        };
+        if (vorne) schwarz(weisse.anfang, 0);
         weisse.forEach((n, i) => {
             const k = document.createElement('div');
             k.className = 'w' + (n === 60 ? ' mitte' : '') + (spielbar(n) ? '' : ' aus');
@@ -331,7 +353,7 @@ function bauen() {
                 tiefst = Math.min(tiefst, n); hoechst = Math.max(hoechst, n);
             }
             // dunkle Fuge von 1,5 px zwischen den weißen Tasten
-            k.style.left = (i * ww + 0.75) + 'px';
+            k.style.left = (x0 + i * ww + 0.75) + 'px';
             k.style.width = (ww - 1.5) + 'px';
             // Name nur an den hörbaren C; ganz unten (unter C1, 32,7 Hz) dazu die Frequenz
             const f = freq(n), zeilen = [];
@@ -344,16 +366,7 @@ function bauen() {
                 k.appendChild(t);
             }
             reihe.appendChild(k);
-            if (i < anzahl - 1 && SCHWARZ.has(pc(n + 1))) {
-                const bw = ww * p.sBreite / 100;
-                const b = document.createElement('div');
-                b.className = 's' + (spielbar(n + 1) ? '' : ' aus');
-                if (spielbar(n + 1)) b.dataset.note = n + 1;
-                b.style.left = ((i + 1) * ww - bw / 2) + 'px';
-                b.style.width = bw + 'px';
-                b.style.height = (H * p.sLaenge / 100) + 'px';
-                reihe.appendChild(b);
-            }
+            if (i < anzahl - 1 && SCHWARZ.has(pc(n + 1))) schwarz(n + 1, x0 + (i + 1) * ww - bw / 2);
         });
     });
     $('lage').textContent = hoechst >= tiefst ? tonName(tiefst) + ' – ' + tonName(hoechst) : '–';
@@ -715,10 +728,22 @@ function schieben(fn) {
     p.start = Math.min(weissAb(hoechsterTon()), Math.max(TIEFST, fn(p.start)));
     sichern(); bauen();
 }
-$('okRunter').onclick = () => schieben(n => n - 12);
-$('okHoch').onclick = () => schieben(n => n + 12);
-$('tonRunter').onclick = () => schieben(n => weissAb(n - 1));
-$('tonHoch').onclick = () => schieben(n => weissAuf(n + 1));
+// Knöpfe der Leiste lösen schon beim Aufsetzen des Fingers aus. Ganz oben am Bildschirmrand wartet das
+// iPhone sonst ab, ob eine Wischgeste (Mitteilungen) daraus wird, und bricht den Klick oft ab.
+// Tastatur (Enter, Leertaste) löst weiter über click aus (detail 0)
+function leistenKnopf(id, fn) {
+    const k = $(id);
+    k.addEventListener('pointerdown', e => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        fn();
+    });
+    k.addEventListener('click', e => { if (e.detail === 0) fn(); });
+}
+leistenKnopf('okRunter', () => schieben(n => n - 12));
+leistenKnopf('okHoch', () => schieben(n => n + 12));
+leistenKnopf('tonRunter', () => schieben(n => n - 1));
+leistenKnopf('tonHoch', () => schieben(n => n + 1));
 
 /* ---------- Einstellungen ---------- */
 function wahl(id, werte, aktuell, setzen) {
@@ -813,7 +838,7 @@ $('neuStart').onclick = () => {
 function einstAuf() { einstZeigen(); $('einst').classList.add('offen'); $('fang').classList.add('offen'); $('fertig').focus(); midiLaden(); }
 function einstZu() { $('einst').classList.remove('offen'); $('fang').classList.remove('offen'); $('einstKnopf').focus(); }
 $('fang').addEventListener('pointerdown', e => { e.preventDefault(); einstZu(); });
-$('einstKnopf').onclick = () => $('einst').classList.contains('offen') ? einstZu() : einstAuf();
+leistenKnopf('einstKnopf', () => $('einst').classList.contains('offen') ? einstZu() : einstAuf());
 $('fertig').onclick = einstZu;
 $('zurueck').onclick = () => {
     s[lageName()] = { ...STANDARD[lageName()] };
@@ -823,12 +848,12 @@ $('zurueck').onclick = () => {
 /* ---------- Hilfemodus ---------- */
 const blase = $('blase');
 function hilfeAus() { document.body.classList.remove('hilfemodus'); blase.classList.remove('offen'); }
-$('hilfeKnopf').onclick = () => {
+leistenKnopf('hilfeKnopf', () => {
     if (document.body.classList.toggle('hilfemodus')) {
         blase.textContent = 'Hilfe: Tippe auf ein umrandetes Feld. Esc oder ? beendet.';
         blase.classList.add('offen');
     } else hilfeAus();
-};
+});
 ['pointerdown', 'click'].forEach(typ => document.addEventListener(typ, e => {
     if (!document.body.classList.contains('hilfemodus')) return;
     if (e.target.closest('#hilfeKnopf')) return;
