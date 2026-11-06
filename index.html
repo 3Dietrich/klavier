@@ -94,6 +94,9 @@ html.gedreht body { position: fixed; top: 0; left: 0; transform-origin: top left
 /* Regler: die ganze Zeile ist Ziehfläche. Waagrecht ziehen stellt ein, senkrecht scrollt
    die Einstellungen (der Regler selbst fängt keine Finger, sonst hängt das Scrollen an ihm fest) */
 .zeile.regel { touch-action: pan-y; cursor: ew-resize; }
+/* Gedrehte Seite: der Browser scrollt nur in Bildschirmrichtung, die Einstellungen laufen aber quer über
+   den Schirm. Dort übernimmt die Seite Scrollen und Regler selbst */
+html.gedreht #einst, html.gedreht .zeile.regel { touch-action: none; }
 .zeile.regel input { pointer-events: none; }
 .zeile.regel.zieht input::-webkit-slider-thumb { box-shadow: 0 0 0 8px #e0a52655; }
 input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 44px; background: transparent; margin: 0; }
@@ -191,7 +194,7 @@ body.hilfemodus [data-hilfe] { outline: 2px dashed var(--gold); outline-offset: 
 <script>
 'use strict';
 // Stand der Seite, setzt hochladen.sh beim Hochladen auf Datum_Uhrzeit
-const VERSION = '20261106_1552';
+const VERSION = '20261106_1601';
 const NAMEN = ['c', 'cis', 'd', 'dis', 'e', 'f', 'fis', 'g', 'gis', 'a', 'b', 'h'];
 const SCHWARZ = new Set([1, 3, 6, 8, 10]);
 const SPEICHER = 'klavier.einst';
@@ -783,8 +786,47 @@ function einstZeigen() {
 // Regler über die ganze Zeile ziehen: erst wenn der Finger klar waagrecht läuft, verstellt er den Wert
 // (relativ, wie ein langer Ziehweg). Senkrecht gibt der Browser den Finger ans Scrollen ab (pointercancel)
 // Bei gedrehter Seite (fest Hoch/Breit, Gerät anders gehalten) läuft die Seiten-Waagrechte senkrecht über den Schirm
-const seitenPunkt = e => document.documentElement.classList.contains('gedreht')
-    ? { x: e.clientY, y: -e.clientX } : { x: e.clientX, y: e.clientY };
+const istGedreht = () => document.documentElement.classList.contains('gedreht');
+const seitenPunkt = e => istGedreht() ? { x: e.clientY, y: -e.clientX } : { x: e.clientX, y: e.clientY };
+// Gedrehte Seite: Einstellungen selbst scrollen, Finger folgt 1:1, beim Loslassen mit Nachlauf
+const einstFeld = $('einst');
+let roll = null, nachlauf = 0;
+einstFeld.addEventListener('pointerdown', e => {
+    cancelAnimationFrame(nachlauf);
+    if (!istGedreht() || document.body.classList.contains('hilfemodus')) return;
+    const p = seitenPunkt(e);
+    roll = { id: e.pointerId, x: p.x, y: p.y, top: einstFeld.scrollTop, an: false, v: 0, t: e.timeStamp, ly: p.y };
+});
+einstFeld.addEventListener('pointermove', e => {
+    if (!roll || e.pointerId !== roll.id) return;
+    const p = seitenPunkt(e), dx = p.x - roll.x, dy = p.y - roll.y;
+    if (!roll.an) {
+        // klar waagrecht: das ist ein Regler, kein Scrollen
+        if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) { roll = null; return; }
+        if (Math.abs(dy) < 8) return;
+        roll.an = true; roll.y = p.y; roll.ly = p.y; roll.t = e.timeStamp;
+        try { einstFeld.setPointerCapture(e.pointerId); } catch (err) {}
+        return;
+    }
+    einstFeld.scrollTop = roll.top - (p.y - roll.y);
+    const dt = e.timeStamp - roll.t;
+    if (dt > 0) roll.v = 0.7 * (roll.ly - p.y) / dt + 0.3 * roll.v;   // Bildpunkte je Millisekunde
+    roll.t = e.timeStamp; roll.ly = p.y;
+});
+['pointerup', 'pointercancel'].forEach(typ => einstFeld.addEventListener(typ, e => {
+    if (!roll || e.pointerId !== roll.id) return;
+    let v = roll.an && e.timeStamp - roll.t < 80 ? roll.v : 0;
+    roll = null;
+    let zuletzt = performance.now();
+    const schritt = jetzt => {
+        const dt = Math.min(40, jetzt - zuletzt); zuletzt = jetzt;
+        einstFeld.scrollTop += v * dt;
+        v *= Math.pow(0.996, dt);
+        if (Math.abs(v) > 0.02) nachlauf = requestAnimationFrame(schritt);
+    };
+    if (Math.abs(v) > 0.05) nachlauf = requestAnimationFrame(schritt);
+}));
+const einstRollt = () => !!(roll && roll.an);
 document.querySelectorAll('.zeile input[type=range]').forEach(inp => {
     const zeile = inp.closest('.zeile');
     zeile.classList.add('regel');
@@ -799,14 +841,15 @@ document.querySelectorAll('.zeile input[type=range]').forEach(inp => {
         if (!z || e.pointerId !== z.id) return;
         const p = seitenPunkt(e), dx = p.x - z.x, dy = p.y - z.y;
         if (!z.an) {
-            if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { z = null; return; }
+            if (einstRollt() || (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx))) { z = null; return; }
             if (Math.abs(dx) < 8) return;
             z.an = true; z.x = p.x;
             zeile.classList.add('zieht');
             try { zeile.setPointerCapture(e.pointerId); } catch (err) {}
             return;
         }
-        const min = +inp.min, max = +inp.max, w = inp.getBoundingClientRect().width || 200;
+        // Länge des Reglers ohne Drehung (getBoundingClientRect wäre gedreht nur seine Dicke): Regler folgt dem Finger
+        const min = +inp.min, max = +inp.max, w = inp.offsetWidth || 200;
         const neu = Math.round(Math.min(max, Math.max(min, z.wert + (p.x - z.x) / w * (max - min))));
         if (neu !== +inp.value) { inp.value = neu; inp.dispatchEvent(new Event('input')); }
     });
