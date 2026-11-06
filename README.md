@@ -11,9 +11,15 @@ Startbildschirm. Die Noten dazu kommen aus dem [Chor-Trainer](https://github.com
 ## Was es kann
 
 - Tastengröße je Lage (quer, hochkant) einstellbar: weiße Tasten, Breite und Länge der schwarzen.  
-- So viele Reihen übereinander, wie bei dieser Größe auf den Bildschirm passen („Auto“), oder fest 1 bis 8.  
+- Reihen übereinander per Regler, höchstens so viele, dass die weißen Tasten noch quadratisch sind;
+  „Auto“ macht sie etwas länger als breit.  
+- Nächste Reihe schließt an oder liegt eine Oktave, Quinte oder Quarte höher; mit „Anschließen“ springt
+  sie in diesen Schritten bis kurz vor das Ende der Reihe darunter.  
+- ‹ › verschieben in Halbtönen, eine Reihe kann auch mit einer schwarzen Taste beginnen.  
 - Umfang von E-1 (10,3 Hz, unten mit Hz-Zahlen) bis zum höchsten Ton, der sich ohne Spiegelfrequenzen
-  rechnen lässt (bei 48 kHz fis'''''' mit etwa 11,8 kHz). Was darüber oder darunter liegt, ist ausgegraut.  
+  rechnen lässt (bei 48 kHz fis'''''' mit etwa 11,8 kHz). Was darüber oder darunter liegt, ist ausgegraut.
+  Passt der ganze Umfang auf den Bildschirm, steht er in der Mitte.  
+- Einstellungen schließen mit „Fertig“; solange sie offen sind, lässt sich daneben spielen.  
 - Zwei Klänge, Klavier und Weich, jeweils mit Regler von rund bis scharf.  
 - Mehrstimmig mit begrenzter Stimmenzahl (4 bis 16): Ist sie erreicht, weicht zuerst der älteste
   losgelassene Ton. Ein Verdichter greift erst über dem Pegel eines Einzeltons.  
