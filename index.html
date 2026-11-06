@@ -89,6 +89,8 @@ html.gedreht body { position: fixed; top: 0; left: 0; transform-origin: top left
 [hidden] { display: none !important; }
 .zeile > label, .zeile > .titel { display: flex; flex-direction: column; font-size: 18px; line-height: 1.15; }
 .zeile b { color: var(--gold); font-weight: 600; }
+.titel button { height: 40px; min-width: 0; font-size: 17px; margin-top: 4px; align-self: flex-start; }
+.titel button[aria-pressed=true] { background: var(--gold); color: #111; }
 /* Regler: die ganze Zeile ist Ziehfläche. Waagrecht ziehen stellt ein, senkrecht scrollt
    die Einstellungen (der Regler selbst fängt keine Finger, sonst hängt das Scrollen an ihm fest) */
 .zeile.regel { touch-action: pan-y; cursor: ew-resize; }
@@ -143,13 +145,17 @@ body.hilfemodus [data-hilfe] { outline: 2px dashed var(--gold); outline-offset: 
         <label for="sLaenge">Schwarz lang <b id="sLaengeW"></b></label>
         <input type="range" id="sLaenge" min="35" max="100" step="1">
     </div>
-    <div class="zeile" data-hilfe="Wie viele Tastenreihen übereinander.">
-        <div class="titel">Reihen</div>
-        <div class="wahl" id="reihenWahl"></div>
+    <div class="zeile" data-hilfe="Wie viele Tastenreihen übereinander. Höchstens so viele, dass die weißen Tasten noch mindestens so lang wie breit sind, darum hängt das Ende des Reglers von Bildschirm und Tastenbreite ab. Auto: so viele, dass die Tasten etwas länger als breit sind.">
+        <div class="titel"><span>Reihen <b id="reihenW"></b></span><button id="reihenAuto">Auto</button></div>
+        <input type="range" id="reihen" min="1" max="4" step="1">
     </div>
     <div class="zeile" data-hilfe="Womit die nächste Reihe beginnt. Anschließend: wo die Reihe darunter aufhört. Oktave, Quinte, Quarte: so viel höher als der Anfang der Reihe darunter.">
         <div class="titel">Nächste Reihe</div>
         <div class="wahl" id="abstandWahl"></div>
+    </div>
+    <div class="zeile" id="buendigZeile" data-hilfe="Für Oktave, Quinte, Quarte. An: die nächste Reihe geht so viele Oktav-, Quint- oder Quartschritte hinauf, dass sie kurz vor dem Ende der Reihe darunter beginnt. Es wiederholen sich nur wenige Tasten. Aus: genau ein Schritt über dem Anfang der Reihe darunter.">
+        <div class="titel">Anschließen</div>
+        <div class="wahl" id="buendigWahl"></div>
     </div>
     <div class="zeile" data-hilfe="Klavier klingt aus wie ein Flügel. Weich hält den Ton, solange der Finger liegt, gut für Anfangstöne.">
         <div class="titel">Klang</div>
@@ -185,13 +191,13 @@ body.hilfemodus [data-hilfe] { outline: 2px dashed var(--gold); outline-offset: 
 <script>
 'use strict';
 // Stand der Seite, setzt hochladen.sh beim Hochladen auf Datum_Uhrzeit
-const VERSION = '20261103_1746';
+const VERSION = '20261106_1529';
 const NAMEN = ['c', 'cis', 'd', 'dis', 'e', 'f', 'fis', 'g', 'gis', 'a', 'b', 'h'];
 const SCHWARZ = new Set([1, 3, 6, 8, 10]);
 const SPEICHER = 'klavier.einst';
 const STANDARD = {
-    quer: { breite: 56, sBreite: 60, sLaenge: 62, reihen: 'auto', abstand: 'anschluss', start: 36 },
-    hoch: { breite: 48, sBreite: 60, sLaenge: 62, reihen: 'auto', abstand: 12, start: 36 },
+    quer: { breite: 56, sBreite: 60, sLaenge: 62, reihen: 'auto', abstand: 'anschluss', buendig: false, start: 36 },
+    hoch: { breite: 48, sBreite: 60, sLaenge: 62, reihen: 'auto', abstand: 12, buendig: false, start: 36 },
     klang: 'klavier', laut: 80, midi: '', stand: 2, ausrichtung: 'auto', stimmen: 8, verdichten: true,
     schaerfe: { klavier: 30, weich: 20 }
 };
@@ -242,35 +248,81 @@ function tonName(n) {
     if (o >= 0) return b + "'".repeat(o);
     return b[0].toUpperCase() + b.slice(1) + ','.repeat(-o - 1);
 }
-const weissAb = n => { while (SCHWARZ.has(n % 12)) n--; return n; };
-const weissAuf = n => { while (SCHWARZ.has(n % 12)) n++; return n; };
+// Tonklasse 0-11, auch für die ausgegrauten Tasten unter MIDI 0
+const pc = n => ((n % 12) + 12) % 12;
+const weissAb = n => { while (SCHWARZ.has(pc(n))) n--; return n; };
+const weissAuf = n => { while (SCHWARZ.has(pc(n))) n++; return n; };
 
 /* ---------- Tastatur aufbauen ---------- */
+let reihenMax = 1;
 function bauen() {
     const p = prof();
     tasten.innerHTML = '';
-    // Auto: so viele Reihen, wie Platz ist, solange die weißen Tasten noch etwas länger als breit sind
-    const ABSTAND = 6, PLATZ = tasten.clientHeight - 6;
-    const anzahlReihen = p.reihen === 'auto'
-        ? Math.max(1, Math.floor((PLATZ + ABSTAND) / (p.breite * 1.25 + ABSTAND))) : p.reihen;
-    const oben = hoechsterTon();
-    const reihen = [];
-    for (let r = 0; r < anzahlReihen; r++) {
+    const ABSTAND = 6, PLATZ = tasten.clientHeight - 6, W = tasten.clientWidth - 6;
+    const anzahl = Math.max(3, Math.round(W / p.breite)), ww = W / anzahl;
+    // Höchstens so viele Reihen, dass die weißen Tasten mindestens quadratisch bleiben.
+    // Auto: so viele, dass sie noch etwas länger als breit sind
+    reihenMax = Math.max(1, Math.min(40, Math.floor((PLATZ + ABSTAND) / (ww + ABSTAND))));
+    const reihenAuto = Math.max(1, Math.min(reihenMax, Math.floor((PLATZ + ABSTAND) / (ww * 1.25 + ABSTAND))));
+    const anzahlReihen = p.reihen === 'auto' ? reihenAuto : Math.min(reihenMax, p.reihen);
+    $('reihen').max = reihenMax; $('reihen').value = anzahlReihen;
+    $('reihenW').textContent = anzahlReihen;
+    $('reihenAuto').setAttribute('aria-pressed', String(p.reihen === 'auto'));
+
+    const oben = hoechsterTon(), wu = weissAuf(TIEFST), wo = weissAb(oben);
+    // Weiße Tasten aller Reihen, unterste Reihe ab dem Ton anfang
+    function plan(anfang) {
+        const rs = [];
+        let a = anfang;
+        for (let r = 0; r < anzahlReihen; r++) {
+            if (r > 0) {
+                const ende = rs[r - 1][anzahl - 1];
+                if (p.abstand === 'anschluss') a = weissAuf(ende + 1);
+                else {
+                    // Anschließen: so viele Schritte hinauf, dass die Reihe kurz vor dem Ende der Reihe darunter beginnt
+                    let k = 1;
+                    if (p.buendig) while (weissAb(a + (k + 1) * p.abstand) <= weissAuf(ende + 1)) k++;
+                    a = weissAb(a + k * p.abstand);
+                }
+            }
+            const weisse = [];
+            for (let n = a; weisse.length < anzahl; n++) if (!SCHWARZ.has(pc(n))) weisse.push(n);
+            rs.push(weisse);
+        }
+        return rs;
+    }
+    const letzte = rs => rs[rs.length - 1][anzahl - 1];
+    const grau = rs => { let u = 0, o = 0; rs.flat().forEach(n => { if (n < wu) u++; else if (n > wo) o++; }); return [u, o]; };
+    let reihenPlan = plan(p.start);
+    // Passt der ganze Tonumfang auf den Schirm (große Webseite), steht er in der Mitte:
+    // ausgegraute Tasten unten wie oben, statt alles Graue oben
+    // Bei Oktave, Quinte, Quarte in ganzen Schritten schieben, damit die Reihen auf ihren Tönen bleiben (z.B. C)
+    const runter = n => weissAb(n - (p.abstand === 'anschluss' ? 1 : p.abstand));
+    let a = p.start;
+    while (a > wu) a = runter(a);
+    let probe = plan(a);
+    if (letzte(probe) >= wo) {
+        let [u, o] = grau(probe);
+        for (let schritt = 0; o - u > 1 && schritt < 500; schritt++) {
+            const b = runter(a), pb = plan(b), [u2, o2] = grau(pb);
+            if (letzte(pb) < wo || u2 - o2 > o - u) break;
+            a = b; probe = pb; u = u2; o = o2;
+        }
+        reihenPlan = probe;
+    }
+
+    let tiefst = Infinity, hoechst = -Infinity;
+    // Außerhalb des Tonumfangs: ausgegraut und stumm (ohne data-note)
+    const spielbar = n => n >= TIEFST && n <= oben;
+    const reihen = reihenPlan.map(() => {
         const d = document.createElement('div');
         d.className = 'reihe';
         tasten.appendChild(d);
-        reihen.push(d);
-    }
-    let start = p.start, tiefst = Infinity, hoechst = -Infinity, vorigEnde = start;
+        return d;
+    });
     reihen.forEach((reihe, r) => {
-        if (r > 0) start = p.abstand === 'anschluss' ? weissAuf(vorigEnde + 1) : weissAb(start + p.abstand);
-        const W = reihe.clientWidth, H = reihe.clientHeight;
-        const anzahl = Math.max(3, Math.round(W / p.breite)), ww = W / anzahl;
+        const weisse = reihenPlan[r], H = reihe.clientHeight;
         const fs = Math.max(11, Math.min(ww * 0.42, H * 0.16));
-        const weisse = [];
-        for (let n = start; weisse.length < anzahl; n++) if (!SCHWARZ.has(n % 12)) weisse.push(n);
-        // Außerhalb des Tonumfangs: ausgegraut und stumm (ohne data-note)
-        const spielbar = n => n >= TIEFST && n <= oben;
         weisse.forEach((n, i) => {
             const k = document.createElement('div');
             k.className = 'w' + (n === 60 ? ' mitte' : '') + (spielbar(n) ? '' : ' aus');
@@ -281,18 +333,18 @@ function bauen() {
             // dunkle Fuge von 1,5 px zwischen den weißen Tasten
             k.style.left = (i * ww + 0.75) + 'px';
             k.style.width = (ww - 1.5) + 'px';
-            // Name nur an den C; ganz unten (unter C1, 32,7 Hz) dazu die Frequenz
+            // Name nur an den hörbaren C; ganz unten (unter C1, 32,7 Hz) dazu die Frequenz
             const f = freq(n), zeilen = [];
-            if (n % 12 === 0) zeilen.push(tonName(n));
+            if (spielbar(n) && pc(n) === 0) zeilen.push(tonName(n));
             if (f < 32.6 && spielbar(n)) zeilen.push((f < 20 ? f.toFixed(1).replace('.', ',') : Math.round(f)) + ' Hz');
             if (zeilen.length) {
                 const t = document.createElement('span');
                 t.innerHTML = zeilen.map(z => z.replace(' Hz', '<small> Hz</small>')).join('<br>');
-                t.style.fontSize = (zeilen.length > 1 || n % 12 ? Math.min(fs, ww / 3.2) : fs) + 'px';
+                t.style.fontSize = (zeilen.length > 1 || pc(n) ? Math.min(fs, ww / 3.2) : fs) + 'px';
                 k.appendChild(t);
             }
             reihe.appendChild(k);
-            if (i < anzahl - 1 && SCHWARZ.has((n + 1) % 12)) {
+            if (i < anzahl - 1 && SCHWARZ.has(pc(n + 1))) {
                 const bw = ww * p.sBreite / 100;
                 const b = document.createElement('div');
                 b.className = 's' + (spielbar(n + 1) ? '' : ' aus');
@@ -303,7 +355,6 @@ function bauen() {
                 reihe.appendChild(b);
             }
         });
-        vorigEnde = weisse[weisse.length - 1];
     });
     $('lage').textContent = hoechst >= tiefst ? tonName(tiefst) + ' – ' + tonName(hoechst) : '–';
     gedrueckt.forEach((z, n) => { if (z > 0) markieren(n, true); });
@@ -690,8 +741,9 @@ function einstZeigen() {
     $('sLaenge').value = p.sLaenge; $('sLaengeW').textContent = p.sLaenge + ' %';
     $('laut').value = s.laut; $('lautW').textContent = s.laut + ' %';
     $('schaerfe').value = s.schaerfe[s.klang]; $('schaerfeW').textContent = s.schaerfe[s.klang] + ' %';
-    wahl('reihenWahl', [['auto', 'Auto'], ...(quer ? [1, 2, 3, 4] : [3, 4, 5, 6, 8]).map(r => [r, String(r)])], p.reihen, v => { p.reihen = v; });
     wahl('abstandWahl', [['anschluss', 'Anschließend'], [12, 'Oktave'], [7, 'Quinte'], [5, 'Quarte']], p.abstand, v => { p.abstand = v; });
+    $('buendigZeile').hidden = p.abstand === 'anschluss';
+    wahl('buendigWahl', [[false, 'Aus'], [true, 'An']], !!p.buendig, v => { p.buendig = v; });
     wahl('klangWahl', [['klavier', 'Klavier'], ['weich', 'Weich (hält)']], s.klang, v => { s.klang = v; });
     wahl('verdichterWahl', [[false, 'Aus'], [true, 'An']], s.verdichten, v => { s.verdichten = v; verdichterSetzen(); });
     wahl('stimmenWahl', [4, 6, 8, 12, 16].map(z => [z, String(z)]), s.stimmen, v => { s.stimmen = v; stimmenKappen(v); });
@@ -736,6 +788,9 @@ document.querySelectorAll('.zeile input[type=range]').forEach(inp => {
     const ende = () => { z = null; zeile.classList.remove('zieht'); };
     ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(t => zeile.addEventListener(t, ende));
 });
+// Reihen: Regler endet dort, wo die Tasten quadratisch werden (setzt bauen); Auto-Knopf daneben
+$('reihen').addEventListener('input', e => { prof().reihen = +e.target.value; sichern(); neuBauen(); });
+$('reihenAuto').onclick = () => { prof().reihen = 'auto'; sichern(); bauen(); };
 $('laut').addEventListener('input', e => {
     s.laut = +e.target.value;
     $('lautW').textContent = s.laut + ' %';
